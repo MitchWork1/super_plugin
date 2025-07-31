@@ -355,6 +355,7 @@ document.addEventListener("DOMContentLoaded", function () {
                   body: new URLSearchParams({
                     action: "pcp_release_spot",
                     availability_id: spot_id,
+                    session_id: sessionId,
                     security: pcp_ajax.nonce,
                   }),
                 })

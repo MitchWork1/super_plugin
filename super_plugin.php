@@ -508,6 +508,9 @@ function pcp_book_spot_in_avail() {
 
     $availability_id = intval($_POST['availability_id']);
     $session_id = sanitize_text_field($_POST['session_id'] ?? '');
+    if (!$session_id) {
+        wp_send_json_error('Missing session ID');
+    }
 
     if (!$availability_id || empty($session_id)) {
         wp_send_json_error('Missing spot ID or session ID');
@@ -525,6 +528,8 @@ function pcp_book_spot_in_avail() {
         ",$session_id, $availability_id)
     );
 
+    
+
     if ($updated === false) {
         wp_send_json_error('Database error');
     }
@@ -533,6 +538,7 @@ function pcp_book_spot_in_avail() {
         wp_send_json_error('Spot not available or already booked');
     }
     //Add post update to provider
+    update_providers_availability_spots($session_id);
     wp_send_json_success('Spot reserved as pending');
 }
 
@@ -545,6 +551,7 @@ function pcp_release_spot() {
     if (!$availability_id) {
         wp_send_json_error('Missing spot ID');
     }
+    $session_id = sanitize_text_field($_POST['session_id'] ?? null);
 
     $availability_table = $wpdb->prefix . 'availability';
 
@@ -565,8 +572,8 @@ function pcp_release_spot() {
     if ($updated === 0) {
         wp_send_json_error('Spot not pending or already released/booked');
     }
-
     //Add post update to provider
+    update_providers_availability_spots($session_id);
     wp_send_json_success('Spot released');
 }
 
@@ -596,6 +603,7 @@ function pcp_release_all_spots() {
     );
 
     //Add post update to provider
+    update_providers_availability_spots($session_id);
     wp_send_json_success('Spots released');
 }
 
@@ -820,6 +828,7 @@ function paystack_webhook(){
                 WHERE status = 'p' AND session_id = %s
             ", $reference)
         );
+        update_providers_availability_spots($session_id);
     }
     else{
         $wpdb->query(
@@ -841,6 +850,7 @@ function paystack_webhook(){
                 WHERE session_id = %s AND status = 'p'
             ", $reference)
         );
+        update_providers_availability_spots($session_id);
     }
 
     exit();
@@ -1635,7 +1645,6 @@ function get_providers_with_db_id_and_status_by_session($session_id) {
 
     return $result;
 }
-
 
 function update_providers_availability_spots($session_id) {
     $providers = get_providers_with_db_id_and_status_by_session($session_id);
