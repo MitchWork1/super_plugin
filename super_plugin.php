@@ -1,14 +1,34 @@
 <?php
 /*
-Plugin Name: Provider Calendar Plugin
-Description: Custom calendar with provider/service selectors and booking slots from DB.
+Plugin Name: AA Super Plugin
+Description: :)
 Version: 1.0
-Author: You
+Author: Mitchell Konemann
 */
-add_action('wp_enqueue_scripts', 'pcp_enqueue_assets');
-add_action('admin_enqueue_scripts', 'pcp_enqueue_assets');
+//add_action('wp_enqueue_scripts', 'pcp_enqueue_assets');
+//add_action('admin_enqueue_scripts', 'pcp_enqueue_assets');
+add_filter('the_posts', 'detect_custom_calendar_shortcode');
 
-function pcp_enqueue_assets() {
+function detect_custom_calendar_shortcode($posts) {
+    if (empty($posts)) return $posts;
+
+    $found = false;
+    foreach ($posts as $post) {
+        if (has_shortcode($post->post_content, 'custom_calendar')) {
+            $found = true;
+            break;
+        }
+    }
+
+    if ($found) {
+        add_action('wp_enqueue_scripts', 'enqueue_custom_calendar_assets');
+        add_action('admin_enqueue_scripts', 'enqueue_custom_calendar_assets');
+    }
+
+    return $posts;
+}
+
+function enqueue_custom_calendar_assets() {
     wp_enqueue_style('pcp-style', plugin_dir_url(__FILE__) . 'calendar_style.css');
 
     wp_enqueue_script('pcp-calendar', plugin_dir_url(__FILE__) . 'calendar.js', ['jquery'], null, true);
@@ -142,6 +162,7 @@ function pcp_ajax_get_availability() {
             status
         FROM $availability_table
         WHERE service_id = %d
+            AND available_date >= CURDATE()
         ORDER BY available_date, time_slot
     ", $service_id));
 
@@ -184,6 +205,10 @@ function pcp_ajax_get_availability() {
 
     wp_send_json($availability);
 }
+
+//=======================
+//Provider Admin Calendar
+//=======================
 
 add_shortcode('provider_admin_custom_calendar', 'provider_admin_custom_calendar');
 
@@ -250,6 +275,10 @@ function provider_admin_custom_calendar() {
 
     <script>
     document.addEventListener('DOMContentLoaded', function () {
+        const admin_nonce = {
+            ajax_url: "<?= esc_url(admin_url('admin-ajax.php')) ?>",
+            nonce: "<?= esc_js(wp_create_nonce('admin_nonce')) ?>"
+        };
         const serviceSelect = document.getElementById('service-select');
         const calendarTitle = document.getElementById('calendar-title');
         const prevBtn = document.getElementById('prev-month');
@@ -304,13 +333,11 @@ function provider_admin_custom_calendar() {
             const calendarBody = document.getElementById('calendar-body');
             calendarBody.innerHTML = '';
 
-            // Convert Sunday=0 to Monday=0 index
             let firstDay = new Date(year, month, 1).getDay();
             firstDay = firstDay === 0 ? 6 : firstDay - 1;
 
             const daysInMonth = new Date(year, month + 1, 0).getDate();
 
-            // Empty cells before first day
             for (let i = 0; i < firstDay; i++) {
                 const empty = document.createElement('div');
                 empty.className = 'day-cell empty';
@@ -352,12 +379,91 @@ function provider_admin_custom_calendar() {
                     timeTd.className = 'hover-target time-cell';
                     tr.appendChild(timeTd);
 
-                    const spotsTd = document.createElement('td');
-                    spotsTd.className = 'spots hover-target';
-                    const spotsLeft = slot.spots_total - slot.spots_booked;
-                    spotsTd.textContent = `${spotsLeft} / ${slot.spots_total}`;
+                    const spotsTd = document.createElement("td");
+                    spotsTd.classList.add("spots", "hover-target");
+                    const spotsAvailable = slot.spots_total - slot.spots_booked;
+                    spotsTd.textContent = `${spotsAvailable} / ${slot.spots_total}`;
                     tr.appendChild(spotsTd);
 
+                    if (spotsAvailable > 0) {
+                        const btn = document.createElement("button");
+                        btn.classList.add("book-btn");
+                        btn.dataset.spots_info = JSON.stringify(slot.spots);
+                        btn.textContent = "Book Now";
+                        btn.style.position = "absolute";
+                        btn.style.top = "0";
+                        btn.style.left = "0";
+                        btn.style.width = "100%";
+                        btn.style.height = "100%";
+                        btn.style.backgroundColor = "#4caf50";
+                        btn.style.color = "white";
+                        btn.style.border = "none";
+                        btn.style.borderRadius = "4px";
+                        btn.style.fontSize = "11px";
+                        btn.style.display = "flex";
+                        btn.style.justifyContent = "center";
+                        btn.style.alignItems = "center";
+                        btn.style.opacity = "0";
+                        btn.style.pointerEvents = "none";
+                        btn.style.transition = "opacity 0.2s ease-in-out";
+                        btn.style.zIndex = "10";
+                        btn.style.cursor = "pointer";
+
+                        btn.addEventListener("click", (e) => {
+                            const spotsInfoStr = e.target.dataset.spots_info;
+                            const all_spots_info = JSON.parse(spotsInfoStr);
+                            let selectedAvailabilityId = null;
+
+                            for (const spot of all_spots_info) {
+                                if (spot.status === "a") {
+                                    selectedAvailabilityId = spot.availability_id;
+                                    break;
+                                }
+                            }
+
+                            if (selectedAvailabilityId) {
+                                const confirmed = confirm("Are you sure you wish to book this spot?");
+                                if (!confirmed) {
+                                    return;
+                                }
+
+                                fetch(admin_nonce.ajax_url, {
+                                    method: "POST",
+                                    headers: {
+                                    "Content-Type": "application/x-www-form-urlencoded",
+                                    },
+                                    body: new URLSearchParams({
+                                    action: "admin_book_spot_available",
+                                    availability_id: selectedAvailabilityId,
+                                    security: admin_nonce.nonce,
+                                    }),
+                                })
+                                    .then((res) => res.json())
+                                    .then((data) => {
+                                    if (data.success) {
+                                        btn.textContent = "Booked!";
+                                        btn.classList.add("booked-wave");
+                                        btn.disabled = true;
+
+                                        btn.style.opacity = "1";
+                                        btn.style.pointerEvents = "auto";
+
+                                        setTimeout(() => {
+                                        btn.classList.remove("booked-wave");
+                                        btn.disabled = false;
+                                        updateCalendar();
+                                        }, 1000);
+                                    } else {
+                                        alert("Error: " + data.data);
+                                    }
+                                    });
+                                
+                            } else {
+                                alert("No available spot to book.");
+                            }
+                        });
+                        tr.appendChild(btn);
+                    }                    
                     table.appendChild(tr);
                     wrapper.appendChild(table);
                     cell.appendChild(wrapper);
@@ -375,7 +481,7 @@ function provider_admin_custom_calendar() {
 
     <style>
         #calendar-container {
-  max-width: 1000px;
+  max-width: 1050px;
   margin: 20px auto;
   font-family: Arial, sans-serif;
     }
@@ -457,8 +563,14 @@ function provider_admin_custom_calendar() {
   border: 2px solid #07bcf3;
   border-radius: 8px;
   margin-top: 2px;
+  position: realative;
   overflow: hidden;
     }
+
+    .slots-wrapper:hover .book-btn {
+    opacity: 1 !important;
+    pointer-events: auto !important;
+}
 
     .slots-table {
   width: 100%;
@@ -494,6 +606,42 @@ function provider_admin_custom_calendar() {
     return ob_get_clean();
 }
 
+add_action('wp_ajax_admin_book_spot_available', 'admin_book_spot_available');
+
+function admin_book_spot_available(){
+    global $wpdb;
+
+    check_ajax_referer('admin_nonce', 'security');
+    $availability_id = intval($_POST['availability_id']);
+    if (!$availability_id) {
+        wp_send_json_error('Missing spot ID or session ID');
+    }
+
+    $availability_table = $wpdb->prefix . 'availability';
+
+    $updated = $wpdb->query(
+        $wpdb->prepare("
+            UPDATE $availability_table
+            SET status = 'b'
+            WHERE availability_id = %d AND status = 'a'
+        ", $availability_id)
+    );    
+
+    if ($updated === false) {
+        wp_send_json_error('Database error');
+    }
+
+    if ($updated === 0) {
+        wp_send_json_error('Spot not available or already booked');
+    }
+
+    wp_send_json_success('Spot booked');
+}
+
+//====
+//AJAX
+//====
+
 add_action('wp_ajax_pcp_book_spot_in_avail', 'pcp_book_spot_in_avail');
 add_action('wp_ajax_nopriv_pcp_book_spot_in_avail', 'pcp_book_spot_in_avail');
 
@@ -512,8 +660,8 @@ function pcp_book_spot_in_avail() {
         wp_send_json_error('Missing session ID');
     }
 
-    if (!$availability_id || empty($session_id)) {
-        wp_send_json_error('Missing spot ID or session ID');
+    if (!$availability_id) {
+        wp_send_json_error('Missing spot ID');
     }
 
     $availability_table = $wpdb->prefix . 'availability';
@@ -781,6 +929,10 @@ function build_split($provider_data, $total_cost){
 
     return $split;
 }
+
+//========
+//Paystack
+//========
 
 add_action('rest_api_init', function () {
     register_rest_route('pcp/v1', '/paystack/webhook', array(
@@ -1291,7 +1443,6 @@ function provider_service_time_slots_page() {
     $current_user = wp_get_current_user();
     $username = $current_user->user_login;
 
-    // Get provider by provider_name = username
     $provider = $wpdb->get_row($wpdb->prepare(
         "SELECT * FROM {$providers_table} WHERE provider_name = %s",
         $username
@@ -1305,7 +1456,25 @@ function provider_service_time_slots_page() {
     echo '<div class="wrap"><h1>Service Availability Editor</h1>';
 
     $provider_id = $provider->provider_id;
-    $current_date = date('Y-m-d');
+    $today = new DateTime();
+
+    // Handle undo
+    if (isset($_POST['undo_action'], $_POST['undo_slots'])) {
+        $undo_data = json_decode(base64_decode(sanitize_text_field($_POST['undo_slots'])), true);
+        $deleted_count = 0;
+        foreach ($undo_data as $slot) {
+            $deleted = $wpdb->delete($availability_table, [
+                'service_id' => intval($slot['service_id']),
+                'available_date' => sanitize_text_field($slot['available_date']),
+                'time_slot' => sanitize_text_field($slot['time_slot']),
+                'status' => 'a'
+            ]);
+            if ($deleted !== false) {
+                $deleted_count += $deleted;
+            }
+        }
+        echo '<div class="notice notice-warning"><p>Undo complete. Removed ' . $deleted_count . ' spots.</p></div>';
+    }
 
     $services = $wpdb->get_results($wpdb->prepare(
         "SELECT * FROM {$services_table} WHERE provider_id = %d",
@@ -1313,8 +1482,7 @@ function provider_service_time_slots_page() {
     ));
 
     if (empty($services)) {
-        echo '<p><em>No services found for this provider.</em></p>';
-        echo '</div>';
+        echo '<p><em>No services found for this provider.</em></p></div>';
         return;
     }
 
@@ -1323,65 +1491,138 @@ function provider_service_time_slots_page() {
         $service_name = $service->service_name;
         $max_spots = $service->max_spots;
 
-        echo '<h2>' . esc_html($service_name) . '</h2>';
+        echo '<h2 style="border-bottom: 2px solid black; padding-bottom: 5px; margin-bottom: 10px;">' . esc_html($service_name) . '</h2>';
 
         if (isset($_POST['add_time_slot_' . $service_id])) {
             $time_slot = sanitize_text_field($_POST['time_slot']);
             $time_slot_length = intval($_POST['time_slot_length']);
+            $repeating = sanitize_text_field($_POST['repeating_range']);
+            $days_selected = [];
 
-            for ($spot = 1; $spot <= $max_spots; $spot++) {
-                $wpdb->insert($availability_table, [
-                    'service_id'           => $service_id,
-                    'available_date'       => $current_date,
-                    'time_slot'            => $time_slot,
-                    'time_slot_length_min' => $time_slot_length,
-                    'status'            => 'a',
-                ]);
+            $all_days = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
+            foreach ($all_days as $day) {
+                if (!empty($_POST[$day])) {
+                    $days_selected[] = $day;
+                }
             }
 
-            echo '<div class="updated"><p>Time slot added for ' . esc_html($service_name) . ' with ' . intval($max_spots) . ' spots.</p></div>';
+            if (empty($days_selected)) {
+                echo '<div class="notice notice-error"><p>No days selected.</p></div>';
+                continue;
+            }
+
+            $inserted_slots = [];
+            $inserted_count = 0;
+            $duplicates = 0;
+            $skipped = 0;
+
+            $dates_to_insert = [];
+
+            $interval_days = [
+                'this_week' => 7,
+                'next_week' => 7,
+                'full_month' => 31,
+            ];
+
+            $start_offset = ($repeating === 'next_week') ? 7 : 0;
+            $days_range = $interval_days[$repeating] ?? 0;
+
+            for ($i = 0; $i < $days_range; $i++) {
+                $date = (clone $today)->modify("+$i days");
+                if ($i < $start_offset) continue;
+
+                $weekday = strtolower($date->format('l'));
+                if (in_array($weekday, $days_selected)) {
+                    $dates_to_insert[] = $date->format('Y-m-d');
+                }
+            }
+
+            foreach ($dates_to_insert as $date_str) {
+                // Check how many already exist for that day/time
+                $existing = $wpdb->get_var($wpdb->prepare(
+                    "SELECT COUNT(*) FROM {$availability_table}
+                     WHERE service_id = %d AND available_date = %s AND time_slot = %s AND status = 'a'",
+                    $service_id, $date_str, $time_slot
+                ));
+
+                if ($existing >= $max_spots) {
+                    $skipped++;
+                    continue;
+                }
+
+                $spots_to_add = $max_spots - $existing;
+
+                for ($i = 0; $i < $spots_to_add; $i++) {
+                    $success = $wpdb->insert($availability_table, [
+                        'service_id'           => $service_id,
+                        'available_date'       => $date_str,
+                        'time_slot'            => $time_slot,
+                        'time_slot_length_min' => $time_slot_length,
+                        'status'               => 'a',
+                    ]);
+
+                    if ($success !== false) {
+                        $inserted_count++;
+                        $inserted_slots[] = [
+                            'service_id' => $service_id,
+                            'available_date' => $date_str,
+                            'time_slot' => $time_slot
+                        ];
+                    }
+                }
+            }
+
+            if ($inserted_count > 0) {
+                $undo_data = base64_encode(json_encode($inserted_slots));
+                echo '<div class="updated"><p>Added ' . $inserted_count . ' slot(s). ';
+                if ($skipped > 0) {
+                    echo $skipped . ' duplicate(s) not added (max spots reached). ';
+                }
+                echo '<form method="post" style="display:inline;">';
+                echo '<input type="hidden" name="undo_slots" value="' . esc_attr($undo_data) . '">';
+                echo '<input type="submit" name="undo_action" class="button button-secondary" value="Undo">';
+                echo '</form>';
+                echo '</p></div>';
+            } else {
+                echo '<div class="notice notice-warning"><p>No new slots added. All selected days may already be full.</p></div>';
+            }
         }
 
-        echo '<form method="post" style="margin-bottom: 1em;">';
+        // Form
+        echo '<form method="post" style="margin-bottom: 1em;" onsubmit="return confirm(\'Are you sure you want to add this time slot?\')">';
+        echo '<div style="font-weight: bold; margin-bottom: 8px;">Time Slot</div>';
         echo '<input type="time" name="time_slot" required> ';
         echo '<input type="number" name="time_slot_length" placeholder="Length (minutes)" min="1" required> ';
+
+        echo '<div style="margin: 10px 0;">';
+        echo '<div style="font-weight: bold; margin-bottom: 8px;">Days</div>';
+        echo '<div style="display: flex; flex-wrap: wrap; gap: 12px;">';
+        foreach (['monday','tuesday','wednesday','thursday','friday','saturday','sunday'] as $day) {
+            echo '<label style="display: flex; align-items: center; gap: 5px;">';
+            echo '<input type="checkbox" name="' . esc_attr($day) . '"> ' . esc_html(ucfirst($day));
+            echo '</label>';
+        }
+        echo '</div></div>';
+
+        echo '<div style="font-weight: bold; margin-bottom: 8px;">Repeat</div>';
+        echo '<select name="repeating_range" required style="min-width: 180px;">';
+        echo '<option value="">-- Select Repeating Range --</option>';
+        echo '<option value="this_week">This Week</option>';
+        echo '<option value="next_week">Next Week</option>';
+        echo '<option value="full_month">Full Month</option>';
+        echo '</select>';
+
         echo '<input type="submit" name="add_time_slot_' . esc_attr($service_id) . '" class="button button-primary" value="Add Time Slot">';
         echo '</form>';
-
-        $availability_groups = $wpdb->get_results($wpdb->prepare(
-            "SELECT time_slot, time_slot_length_min, 
-                COUNT(*) AS total_spots, 
-                SUM(CASE WHEN status = 'a' THEN 1 ELSE 0 END) AS spots_available
-            FROM {$availability_table}
-            WHERE service_id = %d AND available_date = %s
-            GROUP BY time_slot, time_slot_length_min
-            ORDER BY time_slot",
-            $service_id, $current_date
-        ));
-
-        if (!empty($availability_groups)) {
-            echo '<table class="widefat striped">';
-            echo '<thead><tr><th>Time Slot</th><th>Length (min)</th><th>Spots Available</th></tr></thead><tbody>';
-
-            foreach ($availability_groups as $group) {
-                $start_time = strtotime($group->time_slot);
-                $end_time = strtotime("+" . intval($group->time_slot_length_min) . " minutes", $start_time);
-
-                echo '<tr>';
-                echo '<td>' . esc_html(date("H:i", $start_time)) . ' - ' . esc_html(date("H:i", $end_time)) . '</td>';
-                echo '<td>' . esc_html($group->time_slot_length_min) . '</td>';
-                echo '<td>' . esc_html($group->spots_available) . ' / ' . esc_html($group->total_spots) . '</td>';
-                echo '</tr>';
-            }
-
-            echo '</tbody></table>';
-        } else {
-            echo '<p><em>No availability slots found for this service today.</em></p>';
-        }
     }
+
+    echo '<div style="border-top: 2px solid black; margin: 20px 0; padding-top: 10px;">';
     echo do_shortcode('[provider_admin_custom_calendar]');
-    echo '</div>';
+    echo '</div></div>';
 }
+
+
+
 
 //=============
 //API FUNCTIONS
@@ -1653,8 +1894,6 @@ function update_providers_availability_spots($session_id) {
         main_update_services_availability($provider_info);
     }
 }
-
-
 
 //=========
 //FUNCTIONS
