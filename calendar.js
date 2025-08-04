@@ -8,6 +8,7 @@ document.addEventListener("DOMContentLoaded", function () {
   const clientModal = document.getElementById("client-info-modal");
   const continueBtn = document.getElementById("submit-client-info");
   const cancelBtn = document.getElementById("cancel-client-info");
+  const bookingSummary = document.getElementById("booking_summary");
 
   let $services_info = [];
   let redirect_from_checkout = false;
@@ -228,8 +229,10 @@ document.addEventListener("DOMContentLoaded", function () {
             btn.style.transition = "opacity 0.2s ease-in-out";
             btn.style.zIndex = "10";
             btn.style.cursor = "pointer";
+            
 
             btn.addEventListener("click", (e) => {
+              bookingSummary.style.display = "block";
               btn.disabled = true;
               btn.textContent = "Booking...";
 
@@ -241,10 +244,8 @@ document.addEventListener("DOMContentLoaded", function () {
                   selectedAvailabilityId = spot.availability_id;
                   break;
                 }
-              }
-
-              const bookingSummary = document.getElementById("booking_summary");
-              bookingSummary.style.display = "block";
+              }             
+              
 
               const serviceId = serviceSelect.value;
               const providerId = providerSelect.value;
@@ -255,7 +256,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 providerSelect.options[providerSelect.selectedIndex]
                   .textContent;
               const serviceName = serviceInfo.service_name;
-              const cost = `R${parseFloat(serviceInfo.service_cost).toFixed(
+              const cost = `R${parseFloat(serviceInfo.service_cost_main).toFixed(
                 2
               )}`;
               const time = `${startTime} - ${endTimeStr}`;
@@ -320,7 +321,7 @@ document.addEventListener("DOMContentLoaded", function () {
                     row.innerHTML = `
               <td>${formatDate(dateKey)}</td>
               <td>${startTime} - ${endTimeStr}</td>
-              <td>R${parseFloat(serviceInfo.service_cost).toFixed(2)}</td>
+              <td>R${parseFloat(serviceInfo.service_cost_main).toFixed(2)}</td>
               <td></td>
               `;
                     //tableBody.appendChild(row);
@@ -489,11 +490,36 @@ document.addEventListener("DOMContentLoaded", function () {
                   alert("Something went wrong. Try again.");
                 })
                 .finally(() => {
-                  btn.disabled = false;
-                  btn.style.pointerEvents = "auto";
-                  btn.style.backgroundColor = "#4caf50";
-                  updateCalendar();
-                });
+  btn.disabled = false;
+  btn.style.pointerEvents = "auto";
+  btn.style.backgroundColor = "#4caf50";
+
+  // Recalculate total cost and toggle booking summary display again
+  const allCostTds = document.querySelectorAll(
+    "#booking_summary table.booking-table tbody td:nth-child(3)"
+  );
+
+const totalCost = Array.from(allCostTds)
+  .map((td) => parseFloat(td.textContent.replace("R", "").trim()))
+  .filter((val) => !isNaN(val))
+  .reduce((acc, val) => acc + val, 0);
+
+  const bookingTotalDiv = document.getElementById("booking_total");
+  const bookingSummaryDiv = document.getElementById("booking_summary");
+  const checkoutSection = document.getElementById("checkout_section");
+
+  if (totalCost > 0) {
+    bookingTotalDiv.style.display = "block";
+    bookingSummaryDiv.style.display = "block";
+    checkoutSection.style.display = "block";
+  } else {
+    bookingTotalDiv.style.display = "none";
+    bookingSummaryDiv.style.display = "none";
+    checkoutSection.style.display = "none";
+  }
+
+  updateCalendar();
+});
             });
 
             tr.appendChild(btn);
@@ -534,6 +560,8 @@ document.addEventListener("DOMContentLoaded", function () {
       return;
     }
 
+    serviceSelect.innerHTML = '<option value="">Loading services...</option>';
+
     fetch(
       `${rest_object.rest_url}services?provider=${encodeURIComponent(
         provider
@@ -555,7 +583,7 @@ document.addEventListener("DOMContentLoaded", function () {
           const option = document.createElement("option");
           option.value = service.service_id;
           option.textContent =
-            service.service_name + " - R" + service.service_cost;
+            service.service_name + " - R" + service.service_cost_main;
           serviceSelect.appendChild(option);
         });
         if (services.length > 0) {
@@ -565,6 +593,8 @@ document.addEventListener("DOMContentLoaded", function () {
       })
       .catch((error) => {
         console.error("Error fetching services:", error);
+        serviceSelect.innerHTML =
+        '<option value="">Error loading services</option>';
       });
   });
 

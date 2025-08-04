@@ -28,7 +28,7 @@ function enqueue_custom_calendar_assets() {
 
     wp_enqueue_style('pcp-style', plugin_dir_url(__FILE__) . 'calendar_style.css');
 
-    wp_enqueue_script('pcp-calendar', plugin_dir_url(__FILE__) . 'calendar.js', ['jquery'], null, true);
+    wp_enqueue_script('pcp-calendar', plugin_dir_url(__FILE__) . 'calendar.js', ['jquery'], filemtime(plugin_dir_path(__FILE__) . 'calendar.js'), true);
 
     wp_enqueue_script('paystack', 'https://js.paystack.co/v1/inline.js', [], null, true);
 
@@ -134,7 +134,7 @@ function pcp_rest_get_services(WP_REST_Request $request) {
     $services_table = $wpdb->prefix . 'services';
 
     $services = $wpdb->get_results($wpdb->prepare(
-        "SELECT service_id, service_name, service_cost FROM $services_table WHERE provider_id = %d",
+        "SELECT service_id, service_name, service_cost_main FROM $services_table WHERE provider_id = %d",
         $provider_id
     ));
 
@@ -261,6 +261,10 @@ function provider_admin_custom_calendar() {
         return '<p>No services found for this provider.</p>';
     }
 
+    // Prepare REST URL and nonce for JS
+    $rest_url = esc_url_raw(rest_url('pcp/v1/'));
+    $rest_nonce = wp_create_nonce('wp_rest');
+
     ob_start();
     ?>
 
@@ -291,11 +295,15 @@ function provider_admin_custom_calendar() {
     </div>
 
     <script>
-    document.addEventListener('DOMContentLoaded', function () {
-        const admin_nonce = {
-            ajax_url: "<?= esc_url(admin_url('admin-ajax.php')) ?>",
-            nonce: "<?= esc_js(wp_create_nonce('admin_nonce')) ?>"
+
+        const rest_object = {
+            rest_url: "<?= $rest_url ?>",
+            nonce: "<?= $rest_nonce ?>"
         };
+    </script>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', function () {
         const serviceSelect = document.getElementById('service-select');
         const calendarTitle = document.getElementById('calendar-title');
         const prevBtn = document.getElementById('prev-month');
@@ -333,12 +341,26 @@ function provider_admin_custom_calendar() {
                 return;
             }
 
-            fetch(`<?= admin_url('admin-ajax.php'); ?>?action=get_availability&service_id=${encodeURIComponent(selectedService)}`)
-                .then(res => res.json())
-                .then(data => {
-                    generateCalendar(currentYear, currentMonth, data);
-                    updateControls();
-                });
+            fetch(`${rest_object.rest_url}availability?service_id=${encodeURIComponent(selectedService)}`, {
+                method: 'GET',
+                headers: {
+                    'X-WP-Nonce': rest_object.nonce
+                }
+            })
+            .then(res => {
+                if (!res.ok) {
+                    throw new Error(`HTTP error! status: ${res.status}`);
+                }
+                return res.json();
+            })
+            .then(data => {
+                generateCalendar(currentYear, currentMonth, data);
+                updateControls();
+            })
+            .catch(err => {
+                console.error("Availability fetch failed", err);
+                alert('Failed to load availability data. See console for details.');
+            });
         }
 
         function updateControls() {
@@ -407,24 +429,28 @@ function provider_admin_custom_calendar() {
                         btn.classList.add("book-btn");
                         btn.dataset.spots_info = JSON.stringify(slot.spots);
                         btn.textContent = "Book Now";
-                        btn.style.position = "absolute";
-                        btn.style.top = "0";
-                        btn.style.left = "0";
-                        btn.style.width = "100%";
-                        btn.style.height = "100%";
-                        btn.style.backgroundColor = "#4caf50";
-                        btn.style.color = "white";
-                        btn.style.border = "none";
-                        btn.style.borderRadius = "4px";
-                        btn.style.fontSize = "11px";
-                        btn.style.display = "flex";
-                        btn.style.justifyContent = "center";
-                        btn.style.alignItems = "center";
-                        btn.style.opacity = "0";
-                        btn.style.pointerEvents = "none";
-                        btn.style.transition = "opacity 0.2s ease-in-out";
-                        btn.style.zIndex = "10";
-                        btn.style.cursor = "pointer";
+
+                        // Styling for button (same as your styles)
+                        Object.assign(btn.style, {
+                            position: "absolute",
+                            top: "0",
+                            left: "0",
+                            width: "100%",
+                            height: "100%",
+                            backgroundColor: "#4caf50",
+                            color: "white",
+                            border: "none",
+                            borderRadius: "4px",
+                            fontSize: "11px",
+                            display: "flex",
+                            justifyContent: "center",
+                            alignItems: "center",
+                            opacity: "0",
+                            pointerEvents: "none",
+                            transition: "opacity 0.2s ease-in-out",
+                            zIndex: "10",
+                            cursor: "pointer"
+                        });
 
                         btn.addEventListener("click", (e) => {
                             const spotsInfoStr = e.target.dataset.spots_info;
@@ -444,19 +470,19 @@ function provider_admin_custom_calendar() {
                                     return;
                                 }
 
-                                fetch(admin_nonce.rest_url + 'admin/book_spot_available', {
+                                fetch(rest_object.rest_url + 'admin/book_spot_available', {
                                     method: 'POST',
                                     headers: {
                                         'Content-Type': 'application/json',
-                                        'X-WP-Nonce': admin_nonce.nonce,
+                                        'X-WP-Nonce': rest_object.nonce,
                                     },
                                     body: JSON.stringify({
                                         availability_id: selectedAvailabilityId,
                                     }),
-                                    })
-                                    .then(res => res.json())
-                                    .then(data => {
-                                        if (data.success) {
+                                })
+                                .then(res => res.json())
+                                .then(data => {
+                                    if (data.success) {
                                         btn.textContent = "Booked!";
                                         btn.classList.add("booked-wave");
                                         btn.disabled = true;
@@ -469,18 +495,18 @@ function provider_admin_custom_calendar() {
                                             btn.disabled = false;
                                             updateCalendar();
                                         }, 1000);
-                                        } else {
+                                    } else {
                                         alert("Error: " + (data.message || 'Unknown error'));
-                                        }
-                                    })
-                                    .catch(err => {
-                                        console.error('REST API error:', err);
-                                        alert('An unexpected error occurred.');
-                                    });
-
+                                    }
+                                })
+                                .catch(err => {
+                                    alert('An unexpected error occurred.');
+                                });
+                            }
                         });
+
                         tr.appendChild(btn);
-                    }                    
+                    }
                     table.appendChild(tr);
                     wrapper.appendChild(table);
                     cell.appendChild(wrapper);
@@ -498,139 +524,176 @@ function provider_admin_custom_calendar() {
 
     <style>
         #calendar-container {
-  max-width: 1050px;
-  margin: 20px auto;
-  font-family: Arial, sans-serif;
-    }
+            max-width: 1050px;
+            margin: 20px auto;
+            font-family: Arial, sans-serif;
+        }
 
-    label {
-  display: inline-block;
-  margin: 0 10px 10px 0;
-  font-weight: bold;
-    }
+        label {
+            display: inline-block;
+            margin: 0 10px 10px 0;
+            font-weight: bold;
+        }
 
-    select {
-  margin-right: 20px;
-  padding: 5px;
-  min-width: 180px;
-    }
+        select {
+            margin-right: 20px;
+            padding: 5px;
+            min-width: 180px;
+        }
 
-    #my-calendar {
-  border: 1px solid #ccc;
-  box-shadow: 0 0 8px rgba(0,0,0,0.1);
-  user-select: none;
-    }
+        #my-calendar {
+            border: 1px solid #ccc;
+            box-shadow: 0 0 8px rgba(0,0,0,0.1);
+            user-select: none;
+        }
 
-    .calendar-header {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  background-color: #f5f5f5;
-  border-bottom: 1px solid #ccc;
-  text-align: center;
-  font-weight: bold;
-  font-size: 14px;
-  padding: 10px 0;
-    }
+        .calendar-header {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            background-color: #f5f5f5;
+            border-bottom: 1px solid #ccc;
+            text-align: center;
+            font-weight: bold;
+            font-size: 14px;
+            padding: 10px 0;
+        }
 
-    .calendar-header > div {
-  border-right: 1px solid #ccc;
-    }
+        .calendar-header > div {
+            border-right: 1px solid #ccc;
+        }
 
-    .calendar-header > div:last-child {
-  border-right: none;
-    }
+        .calendar-header > div:last-child {
+            border-right: none;
+        }
 
-    .calendar-body {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  background-color: #fff;
-  min-height: 300px;
-    }
+        .calendar-body {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            background-color: #fff;
+            min-height: 300px;
+        }
 
-    .day-cell {
-  border: 1px solid #eee;
-  min-height: 140px;
-  padding: 8px;
-  font-size: 13px;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-start;
-  position: relative;
-  overflow: hidden;
-  box-sizing: border-box;
-  white-space: nowrap;
-    }
+        .day-cell {
+            border: 1px solid #eee;
+            min-height: 140px;
+            padding: 8px;
+            font-size: 13px;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+            position: relative;
+            overflow: hidden;
+            box-sizing: border-box;
+            white-space: nowrap;
+        }
 
-    .day-cell.today {
-  background-color: #fff9e6;
-  border: 1px solid #ffd700;
-    }
+        .day-cell.today {
+            background-color: #fff9e6;
+            border: 1px solid #ffd700;
+        }
 
-    .day-cell.empty {
-  background: #f9f9f9;
-  border: none;
-    }
+        .day-cell.empty {
+            background: #f9f9f9;
+            border: none;
+        }
 
-    .day-number {
-  font-weight: bold;
-  margin-bottom: 6px;
-    }
+        .day-number {
+            font-weight: bold;
+            margin-bottom: 6px;
+        }
 
-    .slots-wrapper {
-  border: 2px solid #07bcf3;
-  border-radius: 8px;
-  margin-top: 2px;
-  position: realative;
-  overflow: hidden;
-    }
+        .slots-wrapper {
+            border: 2px solid #07bcf3;
+            border-radius: 8px;
+            margin-top: 2px;
+            position: relative;
+            overflow: hidden;
+        }
 
-    .slots-wrapper:hover .book-btn {
-    opacity: 1 !important;
-    pointer-events: auto !important;
-}
+        .slots-wrapper:hover .book-btn {
+            opacity: 1 !important;
+            pointer-events: auto !important;
+        }
 
-    .slots-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-    }
+        .slots-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
 
-    .slots-table td {
-  padding: 4px 6px;
-  border: none;
-  position: relative;
-  cursor: pointer;
-    }
+        .slots-table td {
+            padding: 4px 6px;
+            border: none;
+            position: relative;
+            cursor: pointer;
+        }
 
-    .slots-table td.time-cell {
-  padding: 4px 6px;
-  border: none;
-  position: relative;
-  cursor: pointer;
-  background-color: #90d3ff;
-    }
+        .slots-table td.time-cell {
+            padding: 4px 6px;
+            border: none;
+            position: relative;
+            cursor: pointer;
+            background-color: #90d3ff;
+        }
 
-    .slots-table td.spots {
-  padding: 4px 6px;
-  border: 1px;
-  position: relative;
-  cursor: pointer;
-  background-color: #67c2ff;
-    }
+        .slots-table td.spots {
+            padding: 4px 6px;
+            border: 1px;
+            position: relative;
+            cursor: pointer;
+            background-color: #67c2ff;
+        }
     </style>
 
     <?php
     return ob_get_clean();
 }
 
+
 add_action('rest_api_init', function () {
     register_rest_route('pcp/v1', '/admin/book_spot_available', [
         'methods' => 'POST',
         'callback' => 'admin_book_spot_available_rest',
         'permission_callback' => function ($request) {
-            $nonce = $request->get_header('X-WP-Nonce');
-            return wp_verify_nonce($nonce, 'admin_nonce') && current_user_can('manage_options'); // or other capability check
-        },
+    $nonce = $request->get_header('X-WP-Nonce');
+    if (!wp_verify_nonce($nonce, 'wp_rest')) {
+        return false;
+    }
+
+    $user = wp_get_current_user();
+    if (!$user->exists()) {
+        return false;
+    }
+
+    global $wpdb;
+    $availability_id = intval($request->get_param('availability_id'));
+    if (!$availability_id) {
+        return false;
+    }
+
+    // Find provider linked to logged-in user
+    $provider = $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM {$wpdb->prefix}provider_sites WHERE provider_name = %s",
+        $user->user_login
+    ));
+    if (!$provider) {
+        return false;
+    }
+
+    // Check if the availability slot belongs to this provider via the service
+    $service = $wpdb->get_row($wpdb->prepare(
+        "SELECT s.provider_id 
+         FROM {$wpdb->prefix}availability AS a
+         INNER JOIN {$wpdb->prefix}services AS s ON a.service_id = s.service_id
+         WHERE a.availability_id = %d",
+         $availability_id
+    ));
+    if (!$service) {
+        return false;
+    }
+
+    return $service->provider_id == $provider->provider_id;
+},
     ]);
 });
 
@@ -671,9 +734,9 @@ function admin_book_spot_available_rest(WP_REST_Request $request) {
     ]);
 }
 
-//====
-//AJAX
-//====
+//========
+//Rest API 
+//========
 
 add_action('rest_api_init', function () {
     register_rest_route('pcp/v1', '/book_spot', [
@@ -848,7 +911,8 @@ function pcp_rest_init_payment($request) {
     $results = $wpdb->get_results($wpdb->prepare("
         SELECT 
             a.availability_id,
-            s.service_cost,
+            s.service_cost_main,
+            s.service_cost_provider,
             p.paystack_subaccount
         FROM 
             {$wpdb->prefix}availability a
@@ -869,7 +933,8 @@ function pcp_rest_init_payment($request) {
 
     foreach ($results as $row) {
         $paystack_subaccount = $row['paystack_subaccount'];
-        $cost = floatval($row['service_cost']);
+        $cost_provider = floatval($row['service_cost_provider']);
+        $cost_main = floatval($row(['service_cost_provider']));
         $availability_id = intval($row['availability_id']);
 
         $already_booked = $wpdb->get_var($wpdb->prepare(
@@ -898,22 +963,26 @@ function pcp_rest_init_payment($request) {
             ];
         }
 
-        $provider_data[$paystack_subaccount]['provider_total'] += $cost;
+        $provider_data[$paystack_subaccount]['provider_total'] += $cost_provider;
         $provider_data[$paystack_subaccount]['all_availability_ids'][] = $availability_id;
-        $total_cost += $cost;
+        $total_cost += $cost_main;
     }
 
-    $split = build_split($provider_data, $total_cost); // Assume this function exists
+    $split = build_split($provider_data, $total_cost);
+
+    $split_code = get_split_code($split, $paystack_secret);    
+
+    if(!$split_code){
+        return new WP_REST_Response([
+            'error' => 'Split code creation failed'
+        ], 500);
+    }
 
     $fields = [
         'email' => $customer_email,
         'amount' => $total_cost * 100,
         'reference' => $session_id,
-        'split' => [
-            'type' => 'flat',
-            'bearer_type' => 'account',
-            'subaccounts' => $split
-        ]
+        'split_code' => $split_code 
     ];
 
     $ch = curl_init();
@@ -931,7 +1000,7 @@ function pcp_rest_init_payment($request) {
 
     $response_data = json_decode($response, true);
 
-    if (!isset($response_data['status']) || $response_data['status'] !== true) {
+    if (!isset($response_data['status']) || !$response_data['status']) {
         return new WP_REST_Response([
             'error' => 'Payment initialization failed',
             'response' => $response_data
@@ -952,8 +1021,8 @@ function pcp_rest_init_payment($request) {
 
 
 function build_split($provider_data, $total_cost){
-    $split = [];
-    $operational_cost = $total_cost * 100 * 0.01; //1%, *100 for kobo
+    $subaccounts = [];
+    $operational_cost = intval($total_cost * 100 * 0.01); //1%, *100 for kobo
 
     //Amounts must be in kobo so *100
 
@@ -971,7 +1040,47 @@ function build_split($provider_data, $total_cost){
         'share' => $operational_cost //MY SHARE 
     ];
 
-    return $split;
+    return $subaccounts;
+}
+
+function get_split_code($split, $paystack_secret){
+
+    $url = "https://api.paystack.co/split";
+
+    $fields = [
+        'name' => "Dynamic split" . time(), 
+        'type' => "flat",
+        'currency' => "ZAR", 
+        'bearer_type' => 'account',
+        'subaccounts' => $split
+    ];
+
+    $fields_string = json_encode($fields);
+
+    $ch = curl_init();
+    
+    curl_setopt($ch,CURLOPT_URL, $url);
+    curl_setopt($ch,CURLOPT_POST, true);
+    curl_setopt($ch,CURLOPT_POSTFIELDS, $fields_string);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, array(
+        "Authorization: Bearer $paystack_secret",
+        "Cache-Control: no-cache",
+        "Content-Type: application/json"
+    ));
+    
+    curl_setopt($ch,CURLOPT_RETURNTRANSFER, true); 
+    
+    $result = curl_exec($ch);  
+
+    $response_data = json_decode($result, true);
+
+    if (!isset($response_data['status']) || $response_data['status'] !== true) {
+        error_log(print_r($response_data, true));
+        return null;
+    }
+    
+    return $response_data['data']['split_code'];
+
 }
 
 //========
@@ -1130,7 +1239,8 @@ function create_tables() {
         service_id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
         provider_id BIGINT(20) UNSIGNED NOT NULL,
         service_name VARCHAR(100) NOT NULL,
-        service_cost DECIMAL(10,2) NOT NULL,
+        service_cost_provider DECIMAL(10,2) NOT NULL,
+        service_cost_main DECIMAL(10,2) NOT NULL,
         max_spots SMALLINT UNSIGNED NOT NULL DEFAULT 8,
         PRIMARY KEY (service_id),
         FOREIGN KEY (provider_id) REFERENCES $provider_sites_table(provider_id) ON DELETE CASCADE
@@ -1364,7 +1474,7 @@ function provider_services_manager_page() {
     global $wpdb;
 
     $providers_table = $wpdb->prefix . 'provider_sites';
-    $services_table = $wpdb->prefix . 'services'; // fixed table name
+    $services_table = $wpdb->prefix . 'services';
     $current_user = wp_get_current_user();
     $username = $current_user->user_login;
 
@@ -1382,10 +1492,12 @@ function provider_services_manager_page() {
     // Add service
     if (isset($_POST['add_service_submit'])) {
         $service_name = sanitize_text_field($_POST['service_name']);
-        $service_cost = floatval($_POST['service_cost']);
+        $service_cost_provider = floatval($_POST['service_cost']);
         $max_spots = intval($_POST['max_spots']);
 
-        // Check if the provider already has this service by name
+        // Round up to nearest 10 after adding 8.5%
+        $service_cost_main = ceil(($service_cost_provider * 1.085) / 10) * 10;
+
         $existing = $wpdb->get_var($wpdb->prepare(
             "SELECT COUNT(*) FROM $services_table WHERE service_name = %s AND provider_id = %d",
             $service_name, $provider_id
@@ -1395,16 +1507,18 @@ function provider_services_manager_page() {
             echo '<div class="notice notice-warning"><p>Service already exists.</p></div>';
         } else {
             $wpdb->insert($services_table, [
-                'provider_id'   => $provider_id,
-                'service_name'  => $service_name,
-                'service_cost'  => $service_cost,
-                'max_spots'     => $max_spots
+                'provider_id'           => $provider_id,
+                'service_name'          => $service_name,
+                'service_cost_provider' => $service_cost_provider,
+                'service_cost_main'     => $service_cost_main,
+                'max_spots'             => $max_spots
             ]);
 
             echo '<div class="updated"><p>Service added.</p></div>';
         }
     }
 
+    // Delete service
     if (isset($_POST['delete_service_id'])) {
         $delete_id = intval($_POST['delete_service_id']);
 
@@ -1419,10 +1533,11 @@ function provider_services_manager_page() {
         }
     }
 
-
+    // Edit service cost
     if (isset($_POST['edit_service_submit'])) {
         $edit_id = intval($_POST['edit_service_id']);
-        $new_cost = floatval($_POST['new_service_cost']);
+        $new_cost_provider = floatval($_POST['new_service_cost_provider']);
+        $new_cost_main = ceil(($new_cost_provider * 1.085) / 10) * 10;
 
         $valid = $wpdb->get_var($wpdb->prepare(
             "SELECT COUNT(*) FROM $services_table WHERE service_id = %d AND provider_id = %d",
@@ -1430,18 +1545,27 @@ function provider_services_manager_page() {
         ));
 
         if ($valid) {
-            $wpdb->update($services_table, ['service_cost' => $new_cost], ['service_id' => $edit_id]);
+            $wpdb->update(
+                $services_table,
+                [
+                    'service_cost_provider' => $new_cost_provider,
+                    'service_cost_main'     => $new_cost_main
+                ],
+                ['service_id' => $edit_id]
+            );
             echo '<div class="updated"><p>Service cost updated.</p></div>';
         }
     }
 
+    // Add form
     echo '<form method="post" style="margin-bottom: 1em;">';
     echo '<input type="text" name="service_name" placeholder="New Service Name" required> ';
-    echo '<input type="number" name="service_cost" placeholder="Cost" step="0.01" required> ';
+    echo '<input type="number" name="service_cost" placeholder="Cost (Provider)" step="0.01" required> ';
     echo '<input type="number" name="max_spots" placeholder="Max Spots" required> ';
     echo '<input type="submit" name="add_service_submit" class="button button-primary" value="Add Service">';
     echo '</form>';
 
+    // Display services
     $services = $wpdb->get_results($wpdb->prepare(
         "SELECT * FROM $services_table WHERE provider_id = %d",
         $provider_id
@@ -1449,12 +1573,13 @@ function provider_services_manager_page() {
 
     if ($services) {
         echo '<table class="widefat striped">';
-        echo '<thead><tr><th>Service Name</th><th>Cost</th><th>Max Spots</th><th>Actions</th></tr></thead><tbody>';
+        echo '<thead><tr><th>Service Name</th><th>Provider Cost</th><th>Main Cost</th><th>Max Spots</th><th>Actions</th></tr></thead><tbody>';
 
         foreach ($services as $service) {
             echo '<tr>';
             echo '<td>' . esc_html($service->service_name) . '</td>';
-            echo '<td>' . esc_html(number_format($service->service_cost, 2)) . '</td>';
+            echo '<td>R' . esc_html(number_format($service->service_cost_provider, 2)) . '</td>';
+            echo '<td>R' . esc_html(number_format($service->service_cost_main, 2)) . '</td>';
             echo '<td>' . esc_html($service->max_spots) . '</td>';
             echo '<td>';
             echo '<form method="post" style="display:inline-block;margin-right:10px;">';
@@ -1464,7 +1589,7 @@ function provider_services_manager_page() {
 
             echo '<form method="post" style="display:inline-block;">';
             echo '<input type="hidden" name="edit_service_id" value="' . intval($service->service_id) . '">';
-            echo '<input type="number" name="new_service_cost" placeholder="New Cost" step="0.01" style="width:100px;"> ';
+            echo '<input type="number" name="new_service_cost_provider" placeholder="New Cost" step="0.01" style="width:100px;"> ';
             echo '<input type="submit" name="edit_service_submit" class="button" value="Update">';
             echo '</form>';
             echo '</td>';
@@ -1478,6 +1603,7 @@ function provider_services_manager_page() {
 
     echo '</div>';
 }
+
 
 add_action('admin_menu', 'provider_service_time_slots');
 function provider_service_time_slots() {
@@ -1845,8 +1971,11 @@ function provider_update_service_spots_availability(WP_REST_Request $request){
 //PROVIDER ENDPOINTS
 //==================
 
-//Add to all udpates to db through bookings
+//ADD UPDATE
+//Add to all udpates to db through bookings 
 function main_update_services_availability($provider_info){   
+    //DO NOTHING FOR NOW
+    /*
 
     $base_api_url = $provider_info['base_api_url'];
     $endpoint = $base_api_url . "/main_update_service_availability";
@@ -1907,6 +2036,7 @@ function main_update_services_availability($provider_info){
         'success' => true,
         'data' => $body_json,
     ];
+    */
 }
 
 function verify_and_decrypt_response($request){
