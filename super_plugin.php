@@ -611,6 +611,10 @@ add_action('wp_ajax_admin_book_spot_available', 'admin_book_spot_available');
 function admin_book_spot_available(){
     global $wpdb;
 
+    if (!defined('DOING_AJAX') || !DOING_AJAX) {
+        wp_send_json_error('Not an AJAX request');
+    }
+
     check_ajax_referer('admin_nonce', 'security');
     $availability_id = intval($_POST['availability_id']);
     if (!$availability_id) {
@@ -764,8 +768,8 @@ function pcp_init_payment(){
     check_ajax_referer('pcp_nonce', 'security');
 
     $session_id = sanitize_text_field($_POST['session_id'] ?? '');
-    $customer_name = sanitize_text_field($_POST['customer_name' ?? '']);
-    $customer_email = sanitize_text_field($_POST['customer_email' ?? '']);
+    $customer_name = sanitize_text_field($_POST['customer_name'] ?? '');
+    $customer_email = sanitize_text_field($_POST['customer_email'] ?? '');
 
     if (empty($session_id)) {
         wp_send_json_error('Missing session ID');
@@ -777,10 +781,10 @@ function pcp_init_payment(){
         wp_send_json_error('Missing customer_email');
     }    
 
-    $paystack_secret = get_var($wpdb->prepare("
+    $paystack_secret = $wpdb->get_var("
     SELECT paystack_api_key_secret
     FROM {$wpdb->prefix}paystack_info
-    WHERE id = 1"));
+    WHERE id = 1");
 
     if(!empty($paystack_secret))
     {       
@@ -848,8 +852,8 @@ function pcp_init_payment(){
 
             $fields = [
                 'email' => $customer_email,
-                'amount' => $total_cost,
-                'callback_url' => "https://hello.pstk.xyz/callback",
+                'amount' => $total_cost *100,
+                /*'callback_url' => "https://hello.pstk.xyz/callback",*/
                 'reference' => $session_id,
                 'split' => [
                     'type' => 'flat',
@@ -869,7 +873,7 @@ function pcp_init_payment(){
             curl_setopt($ch,CURLOPT_POSTFIELDS, $fields_string);
             curl_setopt($ch, CURLOPT_HTTPHEADER, array(
                 "Authorization: Bearer $paystack_secret",
-                "Cache-Control: no-cache",
+                "Cache-Control: no-cache"
             ));
     
             //So that curl_exec returns the contents of the cURL; rather than echoing it
@@ -879,15 +883,17 @@ function pcp_init_payment(){
             $response = curl_exec($ch);
             curl_close($ch);
 
-            if (isset($response['status']) && $response['status'] === true) {
-                $authorization_url = $response['data']['authorization_url'];
+            $response_data = json_decode($response, true);
+
+            if (isset($response_data['status']) && $response_data['status'] === true) {
+                $authorization_url = $response_data['data']['authorization_url'];
 
                 //Make sure pending payment availability spot doesn't become available
                 $updated = $wpdb->query(
                     $wpdb->prepare("
                     UPDATE {$wpdb->prefix}availability
                     SET hold_until = NULL
-                    WHERE session_id = %d
+                    WHERE session_id = %s
                 ", $session_id)                            
                 );
                 wp_send_json_success([
@@ -923,7 +929,7 @@ function build_split($provider_data, $total_cost){
     }    
 
     $subaccounts[] = [
-        'subaccount' => HARDCODE, //MY_PACKSTACK CODE
+        'subaccount' => 'ACCT_2try0nqlasfaj7i', //MY_PACKSTACK CODE HARDCODE REPLACE ADD
         'share' => $operational_cost //MY SHARE 
     ];
 
@@ -944,11 +950,11 @@ add_action('rest_api_init', function () {
 
 function paystack_webhook(){
 
-    $paystack_secret = get_var($wpdb->prepare("
+    $paystack_secret = $wpdb->get_var("
         SELECT paystack_api_key_secret
         FROM {$wpdb->prefix}paystack_info
         WHERE id = 1"
-    ));
+    );
 
     if ((strtoupper($_SERVER['REQUEST_METHOD']) != 'POST' ) || !array_key_exists('HTTP_X_PAYSTACK_SIGNATURE', $_SERVER) ) 
     {
@@ -980,6 +986,7 @@ function paystack_webhook(){
                 WHERE status = 'p' AND session_id = %s
             ", $reference)
         );
+        error_log("Transfer Succesful");
         update_providers_availability_spots($session_id);
     }
     else{
@@ -1001,7 +1008,7 @@ function paystack_webhook(){
                     session_id = NULL
                 WHERE session_id = %s AND status = 'p'
             ", $reference)
-        );
+        );        
         update_providers_availability_spots($session_id);
     }
 
@@ -1443,6 +1450,7 @@ function provider_service_time_slots_page() {
     $current_user = wp_get_current_user();
     $username = $current_user->user_login;
 
+    // Get provider
     $provider = $wpdb->get_row($wpdb->prepare(
         "SELECT * FROM {$providers_table} WHERE provider_name = %s",
         $username
@@ -1456,7 +1464,6 @@ function provider_service_time_slots_page() {
     echo '<div class="wrap"><h1>Service Availability Editor</h1>';
 
     $provider_id = $provider->provider_id;
-    $today = new DateTime();
 
     // Handle undo
     if (isset($_POST['undo_action'], $_POST['undo_slots'])) {
@@ -1473,7 +1480,7 @@ function provider_service_time_slots_page() {
                 $deleted_count += $deleted;
             }
         }
-        echo '<div class="notice notice-warning"><p>Undo complete. Removed ' . $deleted_count . ' spots.</p></div>';
+        echo '<div class="notice notice-warning"><p>Undo complete. Removed ' . $deleted_count . ' slot(s).</p></div>';
     }
 
     $services = $wpdb->get_results($wpdb->prepare(
@@ -1482,9 +1489,12 @@ function provider_service_time_slots_page() {
     ));
 
     if (empty($services)) {
-        echo '<p><em>No services found for this provider.</em></p></div>';
+        echo '<p><em>No services found for this provider.</em></p>';
+        echo '</div>';
         return;
     }
+
+    $days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 
     foreach ($services as $service) {
         $service_id = $service->service_id;
@@ -1493,136 +1503,166 @@ function provider_service_time_slots_page() {
 
         echo '<h2 style="border-bottom: 2px solid black; padding-bottom: 5px; margin-bottom: 10px;">' . esc_html($service_name) . '</h2>';
 
+        // We'll store undo data here to show undo button next to Add button
+        $undo_data = '';
+
         if (isset($_POST['add_time_slot_' . $service_id])) {
-            $time_slot = sanitize_text_field($_POST['time_slot']);
-            $time_slot_length = intval($_POST['time_slot_length']);
-            $repeating = sanitize_text_field($_POST['repeating_range']);
-            $days_selected = [];
+            $from_time = sanitize_text_field($_POST['from_time']);
+            $to_time = sanitize_text_field($_POST['to_time']);
+            $from_date = sanitize_text_field($_POST['from_date']);
+            $to_date = sanitize_text_field($_POST['to_date']);
 
-            $all_days = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
-            foreach ($all_days as $day) {
+            $selected_days = [];
+            foreach ($days as $day) {
                 if (!empty($_POST[$day])) {
-                    $days_selected[] = $day;
+                    $selected_days[] = $day;
                 }
             }
 
-            if (empty($days_selected)) {
-                echo '<div class="notice notice-error"><p>No days selected.</p></div>';
-                continue;
-            }
+            $errors = [];
 
-            $inserted_slots = [];
-            $inserted_count = 0;
-            $duplicates = 0;
-            $skipped = 0;
-
-            $dates_to_insert = [];
-
-            $interval_days = [
-                'this_week' => 7,
-                'next_week' => 7,
-                'full_month' => 31,
-            ];
-
-            $start_offset = ($repeating === 'next_week') ? 7 : 0;
-            $days_range = $interval_days[$repeating] ?? 0;
-
-            for ($i = 0; $i < $days_range; $i++) {
-                $date = (clone $today)->modify("+$i days");
-                if ($i < $start_offset) continue;
-
-                $weekday = strtolower($date->format('l'));
-                if (in_array($weekday, $days_selected)) {
-                    $dates_to_insert[] = $date->format('Y-m-d');
-                }
-            }
-
-            foreach ($dates_to_insert as $date_str) {
-                // Check how many already exist for that day/time
-                $existing = $wpdb->get_var($wpdb->prepare(
-                    "SELECT COUNT(*) FROM {$availability_table}
-                     WHERE service_id = %d AND available_date = %s AND time_slot = %s AND status = 'a'",
-                    $service_id, $date_str, $time_slot
-                ));
-
-                if ($existing >= $max_spots) {
-                    $skipped++;
-                    continue;
-                }
-
-                $spots_to_add = $max_spots - $existing;
-
-                for ($i = 0; $i < $spots_to_add; $i++) {
-                    $success = $wpdb->insert($availability_table, [
-                        'service_id'           => $service_id,
-                        'available_date'       => $date_str,
-                        'time_slot'            => $time_slot,
-                        'time_slot_length_min' => $time_slot_length,
-                        'status'               => 'a',
-                    ]);
-
-                    if ($success !== false) {
-                        $inserted_count++;
-                        $inserted_slots[] = [
-                            'service_id' => $service_id,
-                            'available_date' => $date_str,
-                            'time_slot' => $time_slot
-                        ];
-                    }
-                }
-            }
-
-            if ($inserted_count > 0) {
-                $undo_data = base64_encode(json_encode($inserted_slots));
-                echo '<div class="updated"><p>Added ' . $inserted_count . ' slot(s). ';
-                if ($skipped > 0) {
-                    echo $skipped . ' duplicate(s) not added (max spots reached). ';
-                }
-                echo '<form method="post" style="display:inline;">';
-                echo '<input type="hidden" name="undo_slots" value="' . esc_attr($undo_data) . '">';
-                echo '<input type="submit" name="undo_action" class="button button-secondary" value="Undo">';
-                echo '</form>';
-                echo '</p></div>';
+            // Validate times
+            $ft_parts = explode(':', $from_time);
+            $tt_parts = explode(':', $to_time);
+            if (count($ft_parts) !== 2 || count($tt_parts) !== 2) {
+                $errors[] = "Please enter valid From Time and To Time.";
             } else {
-                echo '<div class="notice notice-warning"><p>No new slots added. All selected days may already be full.</p></div>';
+                $from_minutes = intval($ft_parts[0]) * 60 + intval($ft_parts[1]);
+                $to_minutes = intval($tt_parts[0]) * 60 + intval($tt_parts[1]);
+                if ($from_minutes >= $to_minutes) {
+                    $errors[] = "From Time must be earlier than To Time.";
+                }
+            }
+
+            // Validate dates
+            if (!$from_date || !$to_date || strtotime($from_date) === false || strtotime($to_date) === false) {
+                $errors[] = "Please enter valid From Date and To Date.";
+            } else {
+                if (strtotime($from_date) > strtotime($to_date)) {
+                    $errors[] = "From Date must be earlier than or equal to To Date.";
+                }
+                if ((strtotime($to_date) - strtotime($from_date)) > (90 * 86400)) {
+                    $errors[] = "Date range cannot exceed 3 months.";
+                }
+            }
+
+            if (empty($selected_days)) {
+                $errors[] = "Please select at least one day.";
+            }
+
+            if (empty($errors)) {
+                $inserted_count = 0;
+                $skipped_due_to_max = 0;
+                $slot_length = $to_minutes - $from_minutes;
+                $inserted_slots = [];
+
+                $date = new DateTime($from_date);
+                $end = new DateTime($to_date);
+
+                while ($date <= $end) {
+                    $day_name = strtolower($date->format('l'));
+                    if (in_array($day_name, $selected_days)) {
+                        $available_date = $date->format('Y-m-d');
+
+                        $existing_count = $wpdb->get_var($wpdb->prepare(
+                            "SELECT COUNT(*) FROM {$availability_table}
+                             WHERE service_id = %d AND available_date = %s AND time_slot = %s",
+                            $service_id, $available_date, $from_time
+                        ));
+
+                        if ($existing_count >= $max_spots) {
+                            $skipped_due_to_max++;
+                        } else {
+                            $slots_to_add = $max_spots - $existing_count;
+                            for ($i = 0; $i < $slots_to_add; $i++) {
+                                $success = $wpdb->insert($availability_table, [
+                                    'service_id' => $service_id,
+                                    'available_date' => $available_date,
+                                    'time_slot' => $from_time,
+                                    'time_slot_length_min' => $slot_length,
+                                    'status' => 'a'
+                                ]);
+                                if ($success) {
+                                    $inserted_count++;
+                                    $inserted_slots[] = [
+                                        'service_id' => $service_id,
+                                        'available_date' => $available_date,
+                                        'time_slot' => $from_time
+                                    ];
+                                }
+                            }
+                        }
+                    }
+                    $date->modify('+1 day');
+                }
+
+                if ($inserted_count > 0) {
+                    $undo_data = base64_encode(json_encode($inserted_slots));
+                    echo '<div class="notice notice-success"><p>Inserted ' . $inserted_count . ' slot(s).';
+                    if ($skipped_due_to_max > 0) {
+                        echo ' ' . $skipped_due_to_max . ' date(s) skipped due to reaching max spots.';
+                    }
+                    echo '</p></div>';
+                }
+
+                if ($skipped_due_to_max > 0 && $inserted_count == 0) {
+                    // Show warning if only skipped (no inserts)
+                    echo '<div class="notice notice-warning"><p>' . $skipped_due_to_max . ' date(s) skipped due to reaching max spots.</p></div>';
+                }
+            } else {
+                foreach ($errors as $error) {
+                    echo '<div class="notice notice-error"><p>' . esc_html($error) . '</p></div>';
+                }
             }
         }
 
-        // Form
-        echo '<form method="post" style="margin-bottom: 1em;" onsubmit="return confirm(\'Are you sure you want to add this time slot?\')">';
-        echo '<div style="font-weight: bold; margin-bottom: 8px;">Time Slot</div>';
-        echo '<input type="time" name="time_slot" required> ';
-        echo '<input type="number" name="time_slot_length" placeholder="Length (minutes)" min="1" required> ';
+        // Form with Add and Undo buttons side by side
+        echo '<form method="post" onsubmit="return confirm(\'Are you sure you want to add these time slots?\');" style="margin-bottom: 1em;">';
 
-        echo '<div style="margin: 10px 0;">';
-        echo '<div style="font-weight: bold; margin-bottom: 8px;">Days</div>';
-        echo '<div style="display: flex; flex-wrap: wrap; gap: 12px;">';
-        foreach (['monday','tuesday','wednesday','thursday','friday','saturday','sunday'] as $day) {
-            echo '<label style="display: flex; align-items: center; gap: 5px;">';
-            echo '<input type="checkbox" name="' . esc_attr($day) . '"> ' . esc_html(ucfirst($day));
+        echo '<div style="display: flex; gap: 20px; align-items: center; margin-bottom: 15px;">';
+        echo '<div><label style="font-weight:bold;">From Time<br><input type="time" name="from_time" required></label></div>';
+        echo '<div><label style="font-weight:bold;">To Time<br><input type="time" name="to_time" required></label></div>';
+        echo '</div>';
+
+        echo '<div style="display: flex; gap: 20px; align-items: center; margin-bottom: 15px;">';
+        echo '<div><label style="font-weight:bold;">From Date<br><input type="date" name="from_date" required></label></div>';
+        echo '<div><label style="font-weight:bold;">To Date<br><input type="date" name="to_date" required></label></div>';
+        echo '</div>';
+
+        echo '<div style="font-weight: bold; margin-bottom: 7px;">Days of the Week<br>';
+        foreach ($days as $day) {
+            echo '<label style="margin-right: 15px; margin-top: 7px;">';
+            echo '<input type="checkbox" name="' . esc_attr($day) . '"> ' . ucfirst($day);
             echo '</label>';
         }
-        echo '</div></div>';
+        echo '</div>';
 
-        echo '<div style="font-weight: bold; margin-bottom: 8px;">Repeat</div>';
-        echo '<select name="repeating_range" required style="min-width: 180px;">';
-        echo '<option value="">-- Select Repeating Range --</option>';
-        echo '<option value="this_week">This Week</option>';
-        echo '<option value="next_week">Next Week</option>';
-        echo '<option value="full_month">Full Month</option>';
-        echo '</select>';
+        // Buttons container: Add and Undo side by side
+        echo '<div style="display: flex; gap: 10px; align-items: center;">';
 
-        echo '<input type="submit" name="add_time_slot_' . esc_attr($service_id) . '" class="button button-primary" value="Add Time Slot">';
+        // Add Time Slot button inside main form
+        echo '<input type="submit" class="button button-primary" name="add_time_slot_' . esc_attr($service_id) . '" value="Add Time Slot">';
+
+        // Close main form
         echo '</form>';
+
+        // Undo button in its own form, inline style for side by side
+        if (!empty($undo_data)) {
+            echo '<form method="post" style="margin:0; display: inline-block;">';
+            echo '<input type="hidden" name="undo_slots" value="' . esc_attr($undo_data) . '">';
+            echo '<input type="submit" name="undo_action" class="button button-secondary" value="Undo">';
+            echo '</form>';
+        }
+
+        echo '</div>';
     }
+
+    
 
     echo '<div style="border-top: 2px solid black; margin: 20px 0; padding-top: 10px;">';
     echo do_shortcode('[provider_admin_custom_calendar]');
-    echo '</div></div>';
+    echo '</div>';
 }
-
-
-
 
 //=============
 //API FUNCTIONS
@@ -1746,6 +1786,10 @@ function provider_update_service_spots_availability(WP_REST_Request $request){
 
     return new WP_REST_Response(['message' => 'Availability slots inserted successfully'], 201);
 }
+
+//==================
+//PROVIDER ENDPOINTS
+//==================
 
 //Add to all udpates to db through bookings
 function main_update_services_availability($provider_info){   
@@ -1887,6 +1931,7 @@ function get_providers_with_db_id_and_status_by_session($session_id) {
     return $result;
 }
 
+//Function to use whenever a spot is b
 function update_providers_availability_spots($session_id) {
     $providers = get_providers_with_db_id_and_status_by_session($session_id);
 
