@@ -12,34 +12,32 @@ add_filter('the_posts', 'detect_custom_calendar_shortcode');
 function detect_custom_calendar_shortcode($posts) {
     if (empty($posts)) return $posts;
 
-    $found = false;
     foreach ($posts as $post) {
         if (has_shortcode($post->post_content, 'custom_calendar')) {
-            $found = true;
+            add_filter('pcp_should_enqueue_assets', '__return_true');
             break;
         }
-    }
-
-    if ($found) {
-        add_action('wp_enqueue_scripts', 'enqueue_custom_calendar_assets');
-        add_action('admin_enqueue_scripts', 'enqueue_custom_calendar_assets');
     }
 
     return $posts;
 }
 
+add_action('wp_enqueue_scripts', 'enqueue_custom_calendar_assets');
 function enqueue_custom_calendar_assets() {
+    if (!apply_filters('pcp_should_enqueue_assets', false)) return;
+
     wp_enqueue_style('pcp-style', plugin_dir_url(__FILE__) . 'calendar_style.css');
 
     wp_enqueue_script('pcp-calendar', plugin_dir_url(__FILE__) . 'calendar.js', ['jquery'], null, true);
 
     wp_enqueue_script('paystack', 'https://js.paystack.co/v1/inline.js', [], null, true);
 
-    wp_localize_script('pcp-calendar', 'pcp_ajax', [
-        'ajax_url' => admin_url('admin-ajax.php'),
-        'nonce'    => wp_create_nonce('pcp_nonce')
+    wp_localize_script('pcp-calendar', 'rest_object', [
+        'rest_url' => esc_url_raw(rest_url('pcp/v1/')),
+        'nonce'    => wp_create_nonce('wp_rest')
     ]);
 }
+
 
 add_shortcode('custom_calendar', 'pcp_custom_calendar_shortcode');
 
@@ -118,40 +116,59 @@ function pcp_custom_calendar_shortcode() {
     return ob_get_clean();
 }
 
-add_action('wp_ajax_get_services', 'pcp_ajax_get_services');
-add_action('wp_ajax_nopriv_get_services', 'pcp_ajax_get_services');
-function pcp_ajax_get_services() {
+add_action('rest_api_init', function () {
+    register_rest_route('pcp/v1', '/services', [
+        'methods' => 'GET',
+        'callback' => 'pcp_rest_get_services',
+        'permission_callback' => '__return_true', // public endpoint, no auth needed (adjust if necessary)
+    ]);
+});
+function pcp_rest_get_services(WP_REST_Request $request) {
     global $wpdb;
 
-    $provider_id = isset($_GET['provider']) ? intval($_GET['provider']) : 0;
-    if (!$provider_id) wp_send_json([]);
+    $provider_id = intval($request->get_param('provider'));
+    if (!$provider_id) {
+        return rest_ensure_response([]);
+    }
 
     $services_table = $wpdb->prefix . 'services';
+
     $services = $wpdb->get_results($wpdb->prepare(
         "SELECT service_id, service_name, service_cost FROM $services_table WHERE provider_id = %d",
         $provider_id
     ));
 
-    wp_send_json($services);
+    return rest_ensure_response($services);
 }
 
-add_action('wp_ajax_get_availability', 'pcp_ajax_get_availability');
-add_action('wp_ajax_nopriv_get_availability', 'pcp_ajax_get_availability');
-function pcp_ajax_get_availability() {
+add_action('rest_api_init', function () {
+    register_rest_route('pcp/v1', '/availability', [
+        'methods' => 'GET',
+        'callback' => 'pcp_rest_get_availability',
+        'permission_callback' => function ($request) {
+            $nonce = $request->get_header('X-WP-Nonce');
+            return wp_verify_nonce($nonce, 'wp_rest');
+        },
+    ]);
+});
+
+
+function pcp_rest_get_availability(WP_REST_Request $request) {
     global $wpdb;
 
     $availability_table = $wpdb->prefix . 'availability';
 
+    // Clear expired holds
     $wpdb->query("
         UPDATE $availability_table
         SET status = 'a', hold_until = NULL, session_id = NULL
         WHERE status = 'p' AND hold_until < NOW()
     ");
 
-    $service_id = isset($_GET['service_id']) ? intval($_GET['service_id']) : 0;
-    if (!$service_id) wp_send_json([]);
-
-    $availability_table = $wpdb->prefix . 'availability';
+    $service_id = intval($request->get_param('service_id'));
+    if (!$service_id) {
+        return rest_ensure_response([]);
+    }
 
     $results = $wpdb->get_results($wpdb->prepare("
         SELECT 
@@ -169,7 +186,7 @@ function pcp_ajax_get_availability() {
     $availability = [];
 
     foreach ($results as $row) {
-        $date = substr($row->available_date, 0, 10); // Ensure format: YYYY-MM-DD
+        $date = substr($row->available_date, 0, 10);
 
         if (!isset($availability[$date])) {
             $availability[$date] = [];
@@ -193,9 +210,9 @@ function pcp_ajax_get_availability() {
             $availability[$date][$slot_key]['spots_booked']++;
         }
 
-         $availability[$date][$slot_key]['spots'][] = [
-        'availability_id' => intval($row->availability_id),
-        'status'          => $row->status
+        $availability[$date][$slot_key]['spots'][] = [
+            'availability_id' => intval($row->availability_id),
+            'status'          => $row->status
         ];
     }
 
@@ -203,7 +220,7 @@ function pcp_ajax_get_availability() {
         $slots = array_values($slots);
     }
 
-    wp_send_json($availability);
+    return rest_ensure_response($availability);
 }
 
 //=======================
@@ -427,20 +444,19 @@ function provider_admin_custom_calendar() {
                                     return;
                                 }
 
-                                fetch(admin_nonce.ajax_url, {
-                                    method: "POST",
+                                fetch(admin_nonce.rest_url + 'admin/book_spot_available', {
+                                    method: 'POST',
                                     headers: {
-                                    "Content-Type": "application/x-www-form-urlencoded",
+                                        'Content-Type': 'application/json',
+                                        'X-WP-Nonce': admin_nonce.nonce,
                                     },
-                                    body: new URLSearchParams({
-                                    action: "admin_book_spot_available",
-                                    availability_id: selectedAvailabilityId,
-                                    security: admin_nonce.nonce,
+                                    body: JSON.stringify({
+                                        availability_id: selectedAvailabilityId,
                                     }),
-                                })
-                                    .then((res) => res.json())
-                                    .then((data) => {
-                                    if (data.success) {
+                                    })
+                                    .then(res => res.json())
+                                    .then(data => {
+                                        if (data.success) {
                                         btn.textContent = "Booked!";
                                         btn.classList.add("booked-wave");
                                         btn.disabled = true;
@@ -449,18 +465,19 @@ function provider_admin_custom_calendar() {
                                         btn.style.pointerEvents = "auto";
 
                                         setTimeout(() => {
-                                        btn.classList.remove("booked-wave");
-                                        btn.disabled = false;
-                                        updateCalendar();
+                                            btn.classList.remove("booked-wave");
+                                            btn.disabled = false;
+                                            updateCalendar();
                                         }, 1000);
-                                    } else {
-                                        alert("Error: " + data.data);
-                                    }
+                                        } else {
+                                        alert("Error: " + (data.message || 'Unknown error'));
+                                        }
+                                    })
+                                    .catch(err => {
+                                        console.error('REST API error:', err);
+                                        alert('An unexpected error occurred.');
                                     });
-                                
-                            } else {
-                                alert("No available spot to book.");
-                            }
+
                         });
                         tr.appendChild(btn);
                     }                    
@@ -606,66 +623,97 @@ function provider_admin_custom_calendar() {
     return ob_get_clean();
 }
 
-add_action('wp_ajax_admin_book_spot_available', 'admin_book_spot_available');
+add_action('rest_api_init', function () {
+    register_rest_route('pcp/v1', '/admin/book_spot_available', [
+        'methods' => 'POST',
+        'callback' => 'admin_book_spot_available_rest',
+        'permission_callback' => function ($request) {
+            $nonce = $request->get_header('X-WP-Nonce');
+            return wp_verify_nonce($nonce, 'admin_nonce') && current_user_can('manage_options'); // or other capability check
+        },
+    ]);
+});
 
-function admin_book_spot_available(){
+function admin_book_spot_available_rest(WP_REST_Request $request) {
     global $wpdb;
 
-    if (!defined('DOING_AJAX') || !DOING_AJAX) {
-        wp_send_json_error('Not an AJAX request');
-    }
-
-    check_ajax_referer('admin_nonce', 'security');
-    $availability_id = intval($_POST['availability_id']);
+    $availability_id = intval($request->get_param('availability_id'));
     if (!$availability_id) {
-        wp_send_json_error('Missing spot ID or session ID');
+        return new WP_REST_Response([
+            'success' => false,
+            'message' => 'Missing spot ID',
+        ], 400);
     }
 
     $availability_table = $wpdb->prefix . 'availability';
 
     $updated = $wpdb->query(
-        $wpdb->prepare("
-            UPDATE $availability_table
-            SET status = 'b'
-            WHERE availability_id = %d AND status = 'a'
-        ", $availability_id)
-    );    
+        $wpdb->prepare("UPDATE $availability_table SET status = 'b' WHERE availability_id = %d AND status = 'a'", $availability_id)
+    );
 
     if ($updated === false) {
-        wp_send_json_error('Database error');
+        return new WP_REST_Response([
+            'success' => false,
+            'message' => 'Database error',
+        ], 500);
     }
 
     if ($updated === 0) {
-        wp_send_json_error('Spot not available or already booked');
+        return new WP_REST_Response([
+            'success' => false,
+            'message' => 'Spot not available or already booked',
+        ], 409);
     }
 
-    wp_send_json_success('Spot booked');
+    return rest_ensure_response([
+        'success' => true,
+        'message' => 'Spot booked',
+    ]);
 }
 
 //====
 //AJAX
 //====
 
-add_action('wp_ajax_pcp_book_spot_in_avail', 'pcp_book_spot_in_avail');
-add_action('wp_ajax_nopriv_pcp_book_spot_in_avail', 'pcp_book_spot_in_avail');
+add_action('rest_api_init', function () {
+    register_rest_route('pcp/v1', '/book_spot', [
+        'methods'  => 'POST',
+        'callback' => 'pcp_book_spot_in_avail_rest',
+        'permission_callback' => function ($request) {
+            $nonce = $request->get_header('X-WP-Nonce');
+            return wp_verify_nonce($nonce, 'wp_rest');
+        },
+    ]);
 
-add_action('wp_ajax_pcp_release_spot', 'pcp_release_spot');
-add_action('wp_ajax_nopriv_pcp_release_spot', 'pcp_release_spot');
+    register_rest_route('pcp/v1', '/release_spot', [
+        'methods'  => 'POST',
+        'callback' => 'pcp_release_spot_rest',
+        'permission_callback' => function ($request) {
+            $nonce = $request->get_header('X-WP-Nonce');
+            return wp_verify_nonce($nonce, 'wp_rest');
+        },
+    ]);
+
+    register_rest_route('pcp/v1', '/release_all_spots', [
+        'methods'  => ['GET', 'POST'],
+        'callback' => 'pcp_release_all_spots_rest',
+        'permission_callback' => function ($request) {
+            $nonce = $request->get_param('_wpnonce');
+            return wp_verify_nonce($nonce, 'wp_rest');
+        }
+    ]);
+});
+
 
 //Book spot is not a proper booking just desegnating id to availability db
-function pcp_book_spot_in_avail() {
+function pcp_book_spot_in_avail_rest($request) {
     global $wpdb;
 
-    check_ajax_referer('pcp_nonce', 'security');
+    $availability_id = intval($request['availability_id']);
+    $session_id = sanitize_text_field($request['session_id'] ?? '');
 
-    $availability_id = intval($_POST['availability_id']);
-    $session_id = sanitize_text_field($_POST['session_id'] ?? '');
-    if (!$session_id) {
-        wp_send_json_error('Missing session ID');
-    }
-
-    if (!$availability_id) {
-        wp_send_json_error('Missing spot ID');
+    if (!$session_id || !$availability_id) {
+        return new WP_REST_Response(['success' => false, 'message' => 'Missing session or spot ID'], 400);
     }
 
     $availability_table = $wpdb->prefix . 'availability';
@@ -674,36 +722,35 @@ function pcp_book_spot_in_avail() {
         $wpdb->prepare("
             UPDATE $availability_table
             SET status = 'p',
-            hold_until = DATE_ADD(NOW(), INTERVAL 15 MINUTE),
-            session_id = %s
+                hold_until = DATE_ADD(NOW(), INTERVAL 15 MINUTE),
+                session_id = %s
             WHERE availability_id = %d AND status = 'a'
-        ",$session_id, $availability_id)
+        ", $session_id, $availability_id)
     );
 
-    
-
     if ($updated === false) {
-        wp_send_json_error('Database error');
+        return new WP_REST_Response(['success' => false, 'message' => 'Database error'], 500);
     }
 
     if ($updated === 0) {
-        wp_send_json_error('Spot not available or already booked');
+        return new WP_REST_Response(['success' => false, 'message' => 'Spot not available or already booked'], 409);
     }
-    //Add post update to provider
+
     update_providers_availability_spots($session_id);
-    wp_send_json_success('Spot reserved as pending');
+
+    return new WP_REST_Response(['success' => true, 'message' => 'Spot reserved as pending'], 200);
 }
 
-function pcp_release_spot() {
-    global $wpdb;
-    
-    check_ajax_referer('pcp_nonce', 'security');
 
-    $availability_id = intval($_POST['availability_id']);
+function pcp_release_spot_rest($request) {
+    global $wpdb;
+
+    $availability_id = intval($request['availability_id']);
+    $session_id = sanitize_text_field($request['session_id'] ?? '');
+
     if (!$availability_id) {
-        wp_send_json_error('Missing spot ID');
+        return new WP_REST_Response(['success' => false, 'message' => 'Missing spot ID'], 400);
     }
-    $session_id = sanitize_text_field($_POST['session_id'] ?? null);
 
     $availability_table = $wpdb->prefix . 'availability';
 
@@ -711,40 +758,37 @@ function pcp_release_spot() {
         $wpdb->prepare("
             UPDATE $availability_table
             SET status = 'a',
-            hold_until = NULL,
-            session_id = NULL
+                hold_until = NULL,
+                session_id = NULL
             WHERE availability_id = %d AND status = 'p'
         ", $availability_id)
     );
 
     if ($updated === false) {
-        wp_send_json_error('Database error');
+        return new WP_REST_Response(['success' => false, 'message' => 'Database error'], 500);
     }
 
     if ($updated === 0) {
-        wp_send_json_error('Spot not pending or already released/booked');
+        return new WP_REST_Response(['success' => false, 'message' => 'Spot not pending or already released/booked'], 409);
     }
-    //Add post update to provider
+
     update_providers_availability_spots($session_id);
-    wp_send_json_success('Spot released');
+
+    return new WP_REST_Response(['success' => true, 'message' => 'Spot released'], 200);
 }
 
-add_action('wp_ajax_pcp_release_all_spots', 'pcp_release_all_spots');
-add_action('wp_ajax_nopriv_pcp_release_all_spots', 'pcp_release_all_spots');
-
-function pcp_release_all_spots() {
+function pcp_release_all_spots_rest($request) {
     global $wpdb;
 
-    check_ajax_referer('pcp_nonce', 'security');
+    $session_id = sanitize_text_field($request->get_param('session_id'));
 
-    $session_id = sanitize_text_field($_POST['session_id'] ?? '');
     if (!$session_id) {
-        wp_send_json_error('Missing session ID');
+        return new WP_REST_Response(['success' => false, 'message' => 'Missing session ID'], 400);
     }
 
-    $availability_table = $wpdb->prefix . 'availability';    
+    $availability_table = $wpdb->prefix . 'availability';
 
-    $wpdb->query(
+    $updated = $wpdb->query(
         $wpdb->prepare("
             UPDATE $availability_table
             SET status = 'a',
@@ -754,43 +798,54 @@ function pcp_release_all_spots() {
         ", $session_id)
     );
 
-    //Add post update to provider
     update_providers_availability_spots($session_id);
-    wp_send_json_success('Spots released');
+
+    return new WP_REST_Response(['success' => true, 'message' => 'All spots released'], 200);
 }
 
-add_action('wp_ajax_pcp_init_payment', 'pcp_init_payment');
-add_action('wp_ajax_nopriv_pcp_init_payment', 'pcp_init_payment');
 
-function pcp_init_payment(){
+
+add_action('rest_api_init', function () {
+    register_rest_route('pcp/v1', '/init_payment', [
+        'methods'             => 'POST',
+        'callback'            => 'pcp_rest_init_payment',
+        'permission_callback' => function ($request) {
+            $nonce = $request->get_header('X-WP-Nonce');
+            return wp_verify_nonce($nonce, 'wp_rest');
+        }
+    ]);
+});
+
+function pcp_rest_init_payment($request) {
     global $wpdb;
 
-    check_ajax_referer('pcp_nonce', 'security');
+    $params = $request->get_json_params();
 
-    $session_id = sanitize_text_field($_POST['session_id'] ?? '');
-    $customer_name = sanitize_text_field($_POST['customer_name'] ?? '');
-    $customer_email = sanitize_text_field($_POST['customer_email'] ?? '');
+    $session_id = sanitize_text_field($params['session_id'] ?? '');
+    $customer_name = sanitize_text_field($params['customer_name'] ?? '');
+    $customer_email = sanitize_text_field($params['customer_email'] ?? '');
 
     if (empty($session_id)) {
-        wp_send_json_error('Missing session ID');
+        return new WP_REST_Response(['error' => 'Missing session ID'], 400);
     }
     if (empty($customer_name)) {
-        wp_send_json_error('Missing customer_name');
+        return new WP_REST_Response(['error' => 'Missing customer_name'], 400);
     }
     if (empty($customer_email)) {
-        wp_send_json_error('Missing customer_email');
-    }    
+        return new WP_REST_Response(['error' => 'Missing customer_email'], 400);
+    }
 
     $paystack_secret = $wpdb->get_var("
-    SELECT paystack_api_key_secret
-    FROM {$wpdb->prefix}paystack_info
-    WHERE id = 1");
+        SELECT paystack_api_key_secret
+        FROM {$wpdb->prefix}paystack_info
+        WHERE id = 1
+    ");
 
-    if(!empty($paystack_secret))
-    {       
-        //Select (using session_id), availability_id, amount, subaccounts, 
+    if (empty($paystack_secret)) {
+        return new WP_REST_Response(['error' => 'No paystack secret key'], 500);
+    }
 
-        $results = $wpdb->get_results($wpdb->prepare("
+    $results = $wpdb->get_results($wpdb->prepare("
         SELECT 
             a.availability_id,
             s.service_cost,
@@ -803,115 +858,98 @@ function pcp_init_payment(){
             {$wpdb->prefix}provider_sites p ON s.provider_id = p.provider_id
         WHERE 
             a.session_id = %s
-        ", $session_id), ARRAY_A);
+    ", $session_id), ARRAY_A);
 
-        if (!empty($results)) {
-            $provider_data = [];
-            $total_cost = 0;
-
-            foreach ($results as $row) {
-                $paystack_subaccount = $row['paystack_subaccount'];
-                $cost = floatval($row['service_cost']);
-                $availability_id = intval($row['availability_id']);
-
-                $already_booked = $wpdb->get_var($wpdb->prepare(
-                    "SELECT COUNT(*) FROM {$wpdb->prefix}bookings WHERE availability_id = %d",
-                    $availability_id
-                ));
-
-                if (!$already_booked) {
-                    $wpdb->insert(
-                        "{$wpdb->prefix}bookings",
-                        [
-                            'availability_id' => $availability_id,
-                            'customer_name' => $customer_name,
-                            'customer_email' => $customer_email,
-                            'booked_by_main'  => 1
-                        ],
-                        ['%d', '%s', '%s', '%d']
-                    );
-                }
-
-                if (!isset($provider_data[$paystack_subaccount])) {
-                    $provider_data[$paystack_subaccount] = [
-                        'paystack_subaccount' => $paystack_subaccount,
-                        'provider_total' => 0,
-                        'all_availability_ids' => []
-                    ];
-                }
-
-                $provider_data[$paystack_subaccount]['provider_total'] += $cost;
-                $provider_data[$paystack_subaccount]['all_availability_ids'][] = $availability_id;
-                $total_cost += $cost;
-            }
-
-            $split = build_split($provider_data, $total_cost);
-
-
-            $url = "https://api.paystack.co/transaction/initialize";
-
-            $fields = [
-                'email' => $customer_email,
-                'amount' => $total_cost *100,
-                /*'callback_url' => "https://hello.pstk.xyz/callback",*/
-                'reference' => $session_id,
-                'split' => [
-                    'type' => 'flat',
-                    'bearer_type' => 'account',
-                    'subaccounts' => $split
-                ]
-            ];
-
-            $fields_string = http_build_query($fields);
-
-            //open connection
-            $ch = curl_init();
-    
-            //set the url, number of POST vars, POST data
-            curl_setopt($ch,CURLOPT_URL, $url);
-            curl_setopt($ch,CURLOPT_POST, true);
-            curl_setopt($ch,CURLOPT_POSTFIELDS, $fields_string);
-            curl_setopt($ch, CURLOPT_HTTPHEADER, array(
-                "Authorization: Bearer $paystack_secret",
-                "Cache-Control: no-cache"
-            ));
-    
-            //So that curl_exec returns the contents of the cURL; rather than echoing it
-            curl_setopt($ch,CURLOPT_RETURNTRANSFER, true); 
-    
-            //execute post
-            $response = curl_exec($ch);
-            curl_close($ch);
-
-            $response_data = json_decode($response, true);
-
-            if (isset($response_data['status']) && $response_data['status'] === true) {
-                $authorization_url = $response_data['data']['authorization_url'];
-
-                //Make sure pending payment availability spot doesn't become available
-                $updated = $wpdb->query(
-                    $wpdb->prepare("
-                    UPDATE {$wpdb->prefix}availability
-                    SET hold_until = NULL
-                    WHERE session_id = %s
-                ", $session_id)                            
-                );
-                wp_send_json_success([
-                    'redirect_url' => $authorization_url        
-                ]);
-            } 
-            else {
-                wp_send_json_error([
-                    'message' => 'Payment initialization failed',
-                    'response' => $response
-                ]);
-            }
-        }
+    if (empty($results)) {
+        return new WP_REST_Response(['error' => 'No availability entries found'], 404);
     }
-    else{
-        wp_send_json_error('No paystack secret key');
-    }  
+
+    $provider_data = [];
+    $total_cost = 0;
+
+    foreach ($results as $row) {
+        $paystack_subaccount = $row['paystack_subaccount'];
+        $cost = floatval($row['service_cost']);
+        $availability_id = intval($row['availability_id']);
+
+        $already_booked = $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM {$wpdb->prefix}bookings WHERE availability_id = %d",
+            $availability_id
+        ));
+
+        if (!$already_booked) {
+            $wpdb->insert(
+                "{$wpdb->prefix}bookings",
+                [
+                    'availability_id' => $availability_id,
+                    'customer_name'   => $customer_name,
+                    'customer_email'  => $customer_email,
+                    'booked_by_main'  => 1
+                ],
+                ['%d', '%s', '%s', '%d']
+            );
+        }
+
+        if (!isset($provider_data[$paystack_subaccount])) {
+            $provider_data[$paystack_subaccount] = [
+                'paystack_subaccount' => $paystack_subaccount,
+                'provider_total' => 0,
+                'all_availability_ids' => []
+            ];
+        }
+
+        $provider_data[$paystack_subaccount]['provider_total'] += $cost;
+        $provider_data[$paystack_subaccount]['all_availability_ids'][] = $availability_id;
+        $total_cost += $cost;
+    }
+
+    $split = build_split($provider_data, $total_cost); // Assume this function exists
+
+    $fields = [
+        'email' => $customer_email,
+        'amount' => $total_cost * 100,
+        'reference' => $session_id,
+        'split' => [
+            'type' => 'flat',
+            'bearer_type' => 'account',
+            'subaccounts' => $split
+        ]
+    ];
+
+    $ch = curl_init();
+    curl_setopt($ch, CURLOPT_URL, "https://api.paystack.co/transaction/initialize");
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($fields));
+    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        "Authorization: Bearer $paystack_secret",
+        "Cache-Control: no-cache"
+    ]);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+
+    $response = curl_exec($ch);
+    curl_close($ch);
+
+    $response_data = json_decode($response, true);
+
+    if (!isset($response_data['status']) || $response_data['status'] !== true) {
+        return new WP_REST_Response([
+            'error' => 'Payment initialization failed',
+            'response' => $response_data
+        ], 500);
+    }
+
+    // Clear hold_until
+    $wpdb->query($wpdb->prepare("
+        UPDATE {$wpdb->prefix}availability
+        SET hold_until = NULL
+        WHERE session_id = %s
+    ", $session_id));
+
+    return new WP_REST_Response([
+        'redirect_url' => $response_data['data']['authorization_url']
+    ], 200);
 }
+
 
 function build_split($provider_data, $total_cost){
     $split = [];
@@ -1015,17 +1053,24 @@ function paystack_webhook(){
     exit();
 }
 
-add_action('wp_ajax_generate_session_id', 'generate_session_id');
-add_action('wp_ajax_nopriv_generate_session_id', 'generate_session_id');
+add_action('rest_api_init', function () {
+    register_rest_route('pcp/v1', '/generate_session_id', [
+        'methods'  => 'POST',
+        'callback' => 'generate_session_id_rest',
+        'permission_callback' => function ($request) {
+            $nonce = $request->get_header('X-WP-Nonce');
+            return wp_verify_nonce($nonce, 'wp_rest');
+        }
+    ]);
+});
 
-function generate_session_id() {
+function generate_session_id_rest(WP_REST_Request $request) {
     global $wpdb;
 
     $table = $wpdb->prefix . 'availability'; 
-
     $max_attempts = 5;
-    for ($i = 0; $i < $max_attempts; $i++) {
 
+    for ($i = 0; $i < $max_attempts; $i++) {
         $session_id = uniqid('', true);
 
         $count = $wpdb->get_var($wpdb->prepare(
@@ -1034,11 +1079,20 @@ function generate_session_id() {
         ));
 
         if ($count == 0) {
-            wp_send_json_success(['session_id' => $session_id]);
+            return rest_ensure_response([
+                'success' => true,
+                'data' => ['session_id' => $session_id]
+            ]);
         }
     }
-    wp_send_json_error('Could not generate unique session ID');
+
+    return new WP_REST_Response([
+        'success' => false,
+        'message' => 'Could not generate unique session ID'
+    ], 500);
 }
+
+
 
 //=============
 //Merged Plugin 

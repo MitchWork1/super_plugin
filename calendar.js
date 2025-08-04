@@ -9,10 +9,10 @@ document.addEventListener("DOMContentLoaded", function () {
   const continueBtn = document.getElementById("submit-client-info");
   const cancelBtn = document.getElementById("cancel-client-info");
 
-
   let $services_info = [];
   let redirect_from_checkout = false;
-  let sessionId = generateSessionId();
+  let sessionId;
+  generateSessionId();
 
   continueBtn.addEventListener("click", function () {
     const name = document.getElementById("client-name").value.trim();
@@ -23,14 +23,13 @@ document.addEventListener("DOMContentLoaded", function () {
       return;
     }
 
-    fetch(pcp_ajax.ajax_url, {
+    fetch(rest_object.rest_url + "init_payment", {
       method: "POST",
       headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
+        "Content-Type": "application/json",
+        "X-WP-Nonce": rest_object.nonce,
       },
-      body: new URLSearchParams({
-        action: "pcp_init_payment",
-        security: pcp_ajax.nonce,
+      body: JSON.stringify({
         session_id: sessionId,
         customer_email: email,
         customer_name: name,
@@ -43,9 +42,10 @@ document.addEventListener("DOMContentLoaded", function () {
           redirect_from_checkout = true;
           window.location.href = data.data.redirect_url;
         } else {
-          console.error("Payment init failed:", data.data.message);
+          console.error("Payment init failed:", data.message || data);
         }
-      });
+      })
+      .catch((err) => console.error("REST error:", err));
   });
 
   cancelBtn.addEventListener("click", function () {
@@ -65,16 +65,14 @@ document.addEventListener("DOMContentLoaded", function () {
   currentMonth = today.getMonth();
   currentDate = today.getDate();
 
-  window.addEventListener("beforeunload", function (e) {
-    if (!redirect_from_checkout) {
-      navigator.sendBeacon(
-        pcp_ajax.ajax_url,
-        new URLSearchParams({
-          action: "pcp_release_all_spots",
-          session_id: sessionId,
-          security: pcp_ajax.nonce,
-        })
-      );
+  window.addEventListener("beforeunload", function () {
+    if (!redirect_from_checkout && sessionId) {
+      const url = `${
+        rest_object.rest_url
+      }release_all_spots?session_id=${encodeURIComponent(sessionId)}&_wpnonce=${
+        rest_object.nonce
+      }`;
+      navigator.sendBeacon(url);
     }
   });
 
@@ -108,16 +106,23 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     fetch(
-      `${
-        pcp_ajax.ajax_url
-      }?action=get_availability&service_id=${encodeURIComponent(
+      `${rest_object.rest_url}availability?service_id=${encodeURIComponent(
         selectedService
-      )}`
+      )}`,
+      {
+        method: "GET",
+        headers: {
+          "X-WP-Nonce": rest_object.nonce, // Optional if permission_callback requires nonce
+        },
+      }
     )
       .then((res) => res.json())
       .then((data) => {
         generateCalendar(currentYear, currentMonth, data);
         updateControls();
+      })
+      .catch((err) => {
+        console.error("Error fetching availability:", err);
       });
   }
 
@@ -225,6 +230,9 @@ document.addEventListener("DOMContentLoaded", function () {
             btn.style.cursor = "pointer";
 
             btn.addEventListener("click", (e) => {
+              btn.disabled = true;
+              btn.textContent = "Booking...";
+
               const spotsInfoStr = e.target.dataset.spots_info;
               const all_spots_info = JSON.parse(spotsInfoStr);
               let selectedAvailabilityId = null;
@@ -253,16 +261,15 @@ document.addEventListener("DOMContentLoaded", function () {
               const time = `${startTime} - ${endTimeStr}`;
               const date = formatDate(dateKey);
 
-              fetch(pcp_ajax.ajax_url, {
+              fetch(`${rest_object.rest_url}book_spot`, {
                 method: "POST",
                 headers: {
-                  "Content-Type": "application/x-www-form-urlencoded",
+                  "Content-Type": "application/json",
+                  "X-WP-Nonce": rest_object.nonce,
                 },
-                body: new URLSearchParams({
-                  action: "pcp_book_spot_in_avail",
+                body: JSON.stringify({
                   availability_id: selectedAvailabilityId,
                   session_id: sessionId,
-                  security: pcp_ajax.nonce,
                 }),
               })
                 .then((res) => res.json())
@@ -270,195 +277,223 @@ document.addEventListener("DOMContentLoaded", function () {
                   if (data.success) {
                     btn.textContent = "Booked!";
                     btn.classList.add("booked-wave");
-                    btn.disabled = true;
+                    let providerSection = document.querySelector(
+                      `.provider-section[data-provider-id="${providerId}"]`
+                    );
+                    if (!providerSection) {
+                      providerSection = document.createElement("div");
+                      providerSection.classList.add("provider-section");
+                      providerSection.dataset.providerId = providerId;
 
-                    btn.style.opacity = "1";
-                    btn.style.pointerEvents = "auto";
+                      const providerHeading = document.createElement("h3");
+                      providerHeading.textContent = `${providerName}:`;
+                      providerSection.appendChild(providerHeading);
 
-                    setTimeout(() => {
-                      btn.classList.remove("booked-wave");
-                      btn.disabled = false;
-                      updateCalendar();
-                    }, 1000);
-                  } else {
-                    alert("Error: " + data.data);
-                  }
-                });
+                      bookingSummary.appendChild(providerSection);
+                    }
 
-              let providerSection = document.querySelector(
-                `.provider-section[data-provider-id="${providerId}"]`
-              );
-              if (!providerSection) {
-                providerSection = document.createElement("div");
-                providerSection.classList.add("provider-section");
-                providerSection.dataset.providerId = providerId;
+                    let serviceSection = providerSection.querySelector(
+                      `.service-section[data-service-id="${serviceId}"]`
+                    );
+                    if (!serviceSection) {
+                      serviceSection = document.createElement("div");
+                      serviceSection.classList.add("service-section");
+                      serviceSection.dataset.serviceId = serviceId;
 
-                const providerHeading = document.createElement("h3");
-                providerHeading.textContent = `${providerName}:`;
-                providerSection.appendChild(providerHeading);
+                      const heading = document.createElement("h4");
+                      heading.textContent = `${serviceName}:`;
+                      heading.classList.add("service-heading");
+                      serviceSection.appendChild(heading);
 
-                bookingSummary.appendChild(providerSection);
-              }
+                      const table = document.createElement("table");
+                      table.classList.add("booking-table");
 
-              let serviceSection = providerSection.querySelector(
-                `.service-section[data-service-id="${serviceId}"]`
-              );
-              if (!serviceSection) {
-                serviceSection = document.createElement("div");
-                serviceSection.classList.add("service-section");
-                serviceSection.dataset.serviceId = serviceId;
+                      const tbody = document.createElement("tbody");
+                      table.appendChild(tbody);
+                      serviceSection.appendChild(table);
 
-                const heading = document.createElement("h4");
-                heading.textContent = `${serviceName}:`;
-                heading.classList.add("service-heading");
-                serviceSection.appendChild(heading);
+                      providerSection.appendChild(serviceSection);
+                    }
 
-                const table = document.createElement("table");
-                table.classList.add("booking-table");
-
-                const tbody = document.createElement("tbody");
-                table.appendChild(tbody);
-                serviceSection.appendChild(table);
-
-                providerSection.appendChild(serviceSection);
-              }
-
-              const tableBody = serviceSection.querySelector("tbody");
-              const row = document.createElement("tr");
-              row.innerHTML = `
+                    const tableBody = serviceSection.querySelector("tbody");
+                    const row = document.createElement("tr");
+                    row.innerHTML = `
               <td>${formatDate(dateKey)}</td>
               <td>${startTime} - ${endTimeStr}</td>
               <td>R${parseFloat(serviceInfo.service_cost).toFixed(2)}</td>
               <td></td>
               `;
-              //tableBody.appendChild(row);
+                    //tableBody.appendChild(row);
 
-              const colum = document.createElement("td");
-              const delete_button = document.createElement("button");
-              delete_button.textContent = "Delete";
+                    const colum = document.createElement("td");
+                    const delete_button = document.createElement("button");
+                    delete_button.textContent = "Delete";
 
-              delete_button.dataset.availability_id = selectedAvailabilityId;
+                    delete_button.dataset.availability_id =
+                      selectedAvailabilityId;
 
-              delete_button.addEventListener("click", (e) => {
-                const spot_id = e.target.dataset.availability_id;
-                const row_to_delete = e.target.closest("tr");
+                    delete_button.addEventListener("click", (e) => {
+                      button = e.target;
+                      button.disabled = true;
+                      button.textContent = "Deleting...";
 
-                const tbody = row.parentElement;
-                const serviceSection = row.closest(".service-section");
-                const providerSection = row.closest(".provider-section");
+                      const spot_id = e.target.dataset.availability_id;
+                      const row_to_delete = e.target.closest("tr");
 
-                fetch(pcp_ajax.ajax_url, {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/x-www-form-urlencoded",
-                  },
-                  body: new URLSearchParams({
-                    action: "pcp_release_spot",
-                    availability_id: spot_id,
-                    session_id: sessionId,
-                    security: pcp_ajax.nonce,
-                  }),
-                })
-                  .then((res) => res.json())
-                  .then((data) => {
-                    if (data.success) {
-                      row_to_delete.remove();
+                      const tbody = row.parentElement;
+                      const serviceSection = row.closest(".service-section");
+                      const providerSection = row.closest(".provider-section");
 
-                      // Recalculate total cost
-                      const allCostTds = document.querySelectorAll(
-                        "#booking_summary table.booking-table tbody td:nth-child(3)"
-                      );
-                      const totalCost = Array.from(allCostTds)
-                        .map((td) =>
-                          parseFloat(td.textContent.replace("R", ""))
-                        )
-                        .reduce((acc, val) => acc + val, 0);
+                      fetch(`${rest_object.rest_url}release_spot`, {
+                        method: "POST",
+                        headers: {
+                          "Content-Type": "application/json",
+                          "X-WP-Nonce": rest_object.nonce,
+                        },
+                        body: JSON.stringify({
+                          availability_id: spot_id,
+                          session_id: sessionId,
+                        }),
+                      })
+                        .then((res) => res.json())
+                        .then((data) => {
+                          if (data.success) {
+                            row_to_delete.remove();
 
-                      // Update total display
-                      const totalAmountEl =
-                        document.querySelector(".total-amount");
-                      totalAmountEl.textContent = `R${totalCost.toFixed(2)}`;
+                            // Recalculate total cost
+                            const allCostTds = document.querySelectorAll(
+                              "#booking_summary table.booking-table tbody td:nth-child(3)"
+                            );
+                            const totalCost = Array.from(allCostTds)
+                              .map((td) =>
+                                parseFloat(td.textContent.replace("R", ""))
+                              )
+                              .reduce((acc, val) => acc + val, 0);
 
-                      // Hide total and summary if no bookings left
-                      if (allCostTds.length === 0) {
-                        document.getElementById("booking_total").style.display =
-                          "none";
-                        document.getElementById(
-                          "booking_summary"
-                        ).style.display = "none";
-                      }
+                            // Update total display
+                            const totalAmountEl =
+                              document.querySelector(".total-amount");
+                            totalAmountEl.textContent = `R${totalCost.toFixed(
+                              2
+                            )}`;
 
-                      // Remove empty service section
-                      if (tbody.children.length === 0) {
-                        serviceSection.remove();
+                            // Hide total and summary if no bookings left
+                            if (allCostTds.length === 0) {
+                              document.getElementById(
+                                "booking_total"
+                              ).style.display = "none";
+                              document.getElementById(
+                                "booking_summary"
+                              ).style.display = "none";
+                            }
 
-                        // Remove provider section if no more services
-                        const remainingServices =
-                          providerSection.querySelectorAll(".service-section");
-                        if (remainingServices.length === 0) {
-                          providerSection.remove();
-                        }
-                      }
-                      const checkoutSection =
-                        document.getElementById("checkout_section");
+                            // Remove empty service section
+                            if (tbody.children.length === 0) {
+                              serviceSection.remove();
 
-                      if (totalCost > 0) {
-                        document.getElementById("booking_total").style.display =
-                          "block";
-                        document.getElementById(
-                          "booking_summary"
-                        ).style.display = "block";
-                        checkoutSection.style.display = "block";
-                      } else {
-                        document.getElementById("booking_total").style.display =
-                          "none";
-                        document.getElementById(
-                          "booking_summary"
-                        ).style.display = "none";
-                        checkoutSection.style.display = "none";
-                      }
+                              // Remove provider section if no more services
+                              const remainingServices =
+                                providerSection.querySelectorAll(
+                                  ".service-section"
+                                );
+                              if (remainingServices.length === 0) {
+                                providerSection.remove();
+                              }
+                            }
 
-                      updateCalendar();
+                            const checkoutSection =
+                              document.getElementById("checkout_section");
+
+                            if (totalCost > 0) {
+                              document.getElementById(
+                                "booking_total"
+                              ).style.display = "block";
+                              document.getElementById(
+                                "booking_summary"
+                              ).style.display = "block";
+                              checkoutSection.style.display = "block";
+                            } else {
+                              document.getElementById(
+                                "booking_total"
+                              ).style.display = "none";
+                              document.getElementById(
+                                "booking_summary"
+                              ).style.display = "none";
+                              checkoutSection.style.display = "none";
+                            }
+
+                            updateCalendar();
+                          } else {
+                            alert(
+                              "Error: " + (data.message || "Unknown error")
+                            );
+                            button.disabled = false;
+                            button.textContext = "Delete";
+                          }
+                        })
+                        .catch((err) => {
+                          console.error("REST API error:", err);
+                          alert("An unexpected error occurred.");
+
+                          button.disabled = false;
+                          button.textContext = "Delete";
+                        });
+                    });
+
+                    row
+                      .querySelector("td:last-child")
+                      .appendChild(delete_button);
+                    tableBody.appendChild(row);
+
+                    const bookingTotalDiv =
+                      document.getElementById("booking_total");
+                    bookingTotalDiv.style.display = "block";
+
+                    // Get all cost cells in all booking tables
+                    const allCostTds = document.querySelectorAll(
+                      "#booking_summary table.booking-table tbody td:nth-child(3)"
+                    );
+
+                    // Sum all costs
+                    const totalCost = Array.from(allCostTds)
+                      .map((td) => parseFloat(td.textContent.replace("R", "")))
+                      .reduce((acc, val) => acc + val, 0);
+
+                    document.querySelector(
+                      ".total-amount"
+                    ).textContent = `R${totalCost.toFixed(2)}`;
+                    const checkoutSection =
+                      document.getElementById("checkout_section");
+
+                    if (totalCost > 0) {
+                      document.getElementById("booking_total").style.display =
+                        "block";
+                      document.getElementById("booking_summary").style.display =
+                        "block";
+                      checkoutSection.style.display = "block";
                     } else {
-                      alert("Error: " + data.data);
+                      document.getElementById("booking_total").style.display =
+                        "none";
+                      document.getElementById("booking_summary").style.display =
+                        "none";
+                      checkoutSection.style.display = "none";
                     }
-                  });
-              });
-
-              row.querySelector("td:last-child").appendChild(delete_button);
-              tableBody.appendChild(row);
-
-              const bookingTotalDiv = document.getElementById("booking_total");
-              bookingTotalDiv.style.display = "block";
-
-              // Get all cost cells in all booking tables
-              const allCostTds = document.querySelectorAll(
-                "#booking_summary table.booking-table tbody td:nth-child(3)"
-              );
-
-              // Sum all costs
-              const totalCost = Array.from(allCostTds)
-                .map((td) => parseFloat(td.textContent.replace("R", "")))
-                .reduce((acc, val) => acc + val, 0);
-
-              document.querySelector(
-                ".total-amount"
-              ).textContent = `R${totalCost.toFixed(2)}`;
-              const checkoutSection =
-                document.getElementById("checkout_section");
-
-              if (totalCost > 0) {
-                document.getElementById("booking_total").style.display =
-                  "block";
-                document.getElementById("booking_summary").style.display =
-                  "block";
-                checkoutSection.style.display = "block";
-              } else {
-                document.getElementById("booking_total").style.display = "none";
-                document.getElementById("booking_summary").style.display =
-                  "none";
-                checkoutSection.style.display = "none";
-              }
+                  } else {
+                    btn.textContent = "Book Now";
+                    alert("Error: " + (data.message || "Unknown error"));
+                  }
+                })
+                .catch((err) => {
+                  console.error("Booking failed:", err);
+                  btn.textContent = "Book Now";
+                  alert("Something went wrong. Try again.");
+                })
+                .finally(() => {
+                  btn.disabled = false;
+                  btn.style.pointerEvents = "auto";
+                  btn.style.backgroundColor = "#4caf50";
+                  updateCalendar();
+                });
             });
 
             tr.appendChild(btn);
@@ -500,9 +535,15 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     fetch(
-      `${pcp_ajax.ajax_url}?action=get_services&provider=${encodeURIComponent(
+      `${rest_object.rest_url}services?provider=${encodeURIComponent(
         provider
-      )}`
+      )}`,
+      {
+        method: "GET",
+        headers: {
+          "X-WP-Nonce": rest_object.nonce, // optional if you secure the endpoint
+        },
+      }
     )
       .then((res) => res.json())
       .then((services) => {
@@ -519,9 +560,11 @@ document.addEventListener("DOMContentLoaded", function () {
         });
         if (services.length > 0) {
           serviceSelect.value = services[0].service_id;
-
           serviceSelect.dispatchEvent(new Event("change"));
         }
+      })
+      .catch((error) => {
+        console.error("Error fetching services:", error);
       });
   });
 
@@ -533,13 +576,23 @@ document.addEventListener("DOMContentLoaded", function () {
     }
 
     fetch(
-      `${
-        pcp_ajax.ajax_url
-      }?action=get_availability&service_id=${encodeURIComponent(service)}`
+      `${rest_object.rest_url}availability?service_id=${encodeURIComponent(
+        service
+      )}`,
+      {
+        method: "GET",
+        headers: {
+          "X-WP-Nonce": rest_object.nonce, // Optional if permission_callback requires nonce
+        },
+      }
     )
       .then((res) => res.json())
       .then((data) => {
         generateCalendar(currentYear, currentMonth, data);
+        updateControls();
+      })
+      .catch((err) => {
+        console.error("Error fetching availability:", err);
       });
   });
 
@@ -576,21 +629,20 @@ document.addEventListener("DOMContentLoaded", function () {
   }
 
   async function generateSessionId() {
-    const response = await fetch('/wp-admin/admin-ajax.php?action=generate_session_id', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-        }
+    const response = await fetch(rest_object.rest_url + "generate_session_id", {
+      method: "POST",
+      headers: {
+        "X-WP-Nonce": rest_object.nonce, // send nonce in header for security if needed
+      },
     });
 
     const data = await response.json();
 
     if (data.success) {
-        console.log('Generated session ID:', data.data.session_id);
-        return data.data.session_id;
+      console.log("Generated session ID:", data.data.session_id);
+      sessionId = data.data.session_id;
     } else {
-        console.error('Failed to get session ID:', data.data || data);
-        return null;
+      console.error("Failed to get session ID:", data.message || data);
     }
   }
 });

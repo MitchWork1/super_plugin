@@ -252,6 +252,11 @@ select {
   font-weight: 600;
 }
 
+.book-btn:disabled {
+  background-color: #0b3d0b;
+  cursor: not-allowed;
+}
+
 @media (max-width: 768px) {
   #calendar-container {
     max-width: 100%;
