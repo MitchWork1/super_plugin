@@ -10,6 +10,33 @@ document.addEventListener("DOMContentLoaded", function () {
   const cancelBtn = document.getElementById("cancel-client-info");
   const bookingSummary = document.getElementById("booking_summary");
 
+
+  //Check if cusotmer came form callback
+  const queryParams = new URLSearchParams(window.location.search);
+  const reference = queryParams.get("reference");
+
+  fetch("/wp-json/pcp/v1/verify_payment", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ reference }),
+    })
+      .then((response) => response.json())
+      .then((data) => {
+        if (data.success) {
+          console.log("Payment verified:", data.message);
+          
+        } else {
+          console.error("Verification failed:", data.error || data.message);
+          
+        }
+      })
+      .catch((error) => {
+        console.error("Error contacting verification endpoint:", error);
+      });
+
+
   let $services_info = [];
   let redirect_from_checkout = false;
   let sessionId;

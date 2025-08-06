@@ -866,6 +866,86 @@ function pcp_release_all_spots_rest($request) {
     return new WP_REST_Response(['success' => true, 'message' => 'All spots released'], 200);
 }
 
+add_action('rest_api_init', function () {
+    register_rest_route('pcp/v1', '/verify_payment', [
+        'methods'  => 'POST',
+        'callback' => 'pcp_verify_payment',
+        'permission_callback' => function ($request) {
+            $nonce = $request->get_header('X-WP-Nonce');
+            return wp_verify_nonce($nonce, 'wp_rest');
+        },
+    ]);
+});
+
+function pcp_verify_payment($request){
+    global $wpdb;
+
+    $reference = sanitize_text_field($request->get_param('reference'));
+
+    if (empty($reference)) {
+        return new WP_REST_Response(['success' => false, 'error' => 'Missing reference'], 400);
+    }
+
+    $table = $wpdb->prefix . 'availability';
+
+    $row = $wpdb->get_row($wpdb->prepare(
+        "SELECT availability_id, status FROM $table WHERE session_id = %s",
+        $reference
+    ));
+
+    if (!$row) {
+        return new WP_REST_Response(['success' => false, 'error' => 'Session ID not found'], 404);
+    }
+
+    if ($row->status === 'b') {
+        return new WP_REST_Response(['success' => true, 'message' => 'Already verified (status b)']);
+    }
+
+    $paystack_secret = $wpdb->get_var("
+        SELECT paystack_api_key_secret
+        FROM {$wpdb->prefix}paystack_info
+        WHERE id = 1
+    ");
+
+    $curl = curl_init();
+  
+    curl_setopt_array($curl, array(
+        CURLOPT_URL => "https://api.paystack.co/transaction/verify/$reference",
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_ENCODING => "",
+        CURLOPT_MAXREDIRS => 10,
+        CURLOPT_TIMEOUT => 30,
+        CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
+        CURLOPT_CUSTOMREQUEST => "GET",
+        CURLOPT_HTTPHEADER => array(
+            "Authorization: Bearer $paystack_secret",
+            "Cache-Control: no-cache",
+        ),
+    ));
+    
+    $response = curl_exec($curl);
+    $err = curl_error($curl);
+    curl_close($curl);
+
+    if ($err) {
+        return new WP_REST_Response(['success' => false, 'error' => 'Paystack Error: ' . $err], 500);
+    }
+
+    $result = json_decode($response, true);
+
+    $paystack_data = $result['data'];
+    $customer_email = sanitize_email($paystack_data['customer']['email']);
+    if ($paystack_data['status'] === 'success') {
+        $wpdb->update($table, ['status' => 'b'], ['availability_id' => $row->availability_id]);
+        create_and_send_email($customer_email, $reference);
+        return new WP_REST_Response(['success' => true, 'message' => 'Payment verified successfully']);
+    } else {
+        $wpdb->update($table, ['status' => 'a'], ['availability_id' => $row->availability_id]);
+        return new WP_REST_Response(['success' => false, 'message' => 'Payment verification failed'], 400);
+    }
+}
+
+
 
 
 add_action('rest_api_init', function () {
@@ -934,7 +1014,7 @@ function pcp_rest_init_payment($request) {
     foreach ($results as $row) {
         $paystack_subaccount = $row['paystack_subaccount'];
         $cost_provider = floatval($row['service_cost_provider']);
-        $cost_main = floatval($row(['service_cost_provider']));
+        $cost_main = floatval($row['service_cost_main']);
         $availability_id = intval($row['availability_id']);
 
         $already_booked = $wpdb->get_var($wpdb->prepare(
@@ -1007,16 +1087,20 @@ function pcp_rest_init_payment($request) {
         ], 500);
     }
 
-    // Clear hold_until
+    // Give user 15 minutes to complete payment
     $wpdb->query($wpdb->prepare("
         UPDATE {$wpdb->prefix}availability
-        SET hold_until = NULL
+        SET hold_until = DATE_ADD(NOW(), INTERVAL 5 MINUTE)
         WHERE session_id = %s
     ", $session_id));
 
     return new WP_REST_Response([
-        'redirect_url' => $response_data['data']['authorization_url']
-    ], 200);
+        'success' => true,
+        'data' => [
+            'redirect_url' => $response_data['data']['authorization_url']
+        ]
+        ], 200
+    );
 }
 
 
@@ -1095,59 +1179,85 @@ add_action('rest_api_init', function () {
     ));
 });
 
-function paystack_webhook(){
 
+function paystack_webhook(WP_REST_Request $request) {
+    global $wpdb;
+    $availability_table = $wpdb->prefix . 'availability';
+    $bookings_table = $wpdb->prefix . 'bookings';
+
+    // Immediately respond 200 OK to Paystack
+    $response = new WP_REST_Response(['status' => 'ok'], 200);
+
+    // Send response early
+    if (function_exists('fastcgi_finish_request')) {
+        fastcgi_finish_request();
+    } else {
+        ignore_user_abort(true);
+        ob_flush();
+        flush();
+    }
+
+    // Get raw body and signature header from request object
+    $input = $request->get_body();
+    $signature = $request->get_header('x-paystack-signature');
+
+    // Get your Paystack secret key from DB
     $paystack_secret = $wpdb->get_var("
         SELECT paystack_api_key_secret
         FROM {$wpdb->prefix}paystack_info
-        WHERE id = 1"
-    );
+        WHERE id = 1
+    ");
 
-    if ((strtoupper($_SERVER['REQUEST_METHOD']) != 'POST' ) || !array_key_exists('HTTP_X_PAYSTACK_SIGNATURE', $_SERVER) ) 
-    {
-        exit();
+    if (!$signature || $signature !== hash_hmac('sha512', $input, $paystack_secret)) {
+        error_log(date('[Y-m-d H:i:s] ') . "Paystack webhook: Invalid signature");
+        return $response;
     }
-        
 
-    // Retrieve the request's body
-    $input = @file_get_contents("php://input");
-
-    // validate event do all at once to avoid timing attack
-    if($_SERVER['HTTP_X_PAYSTACK_SIGNATURE'] !== hash_hmac('sha512', $input, $paystack_secret))
-    {
-        exit();
-    }        
-
-    http_response_code(200);
-
-    // parse event (which is json string) as object
-    // Do something - that will not take long - with $event
     $event = json_decode($input);
-    $reference = $event->data->reference;
-    if ($event->event === 'charge.success' || $event->event === 'transfer.success') {       
-        //Add api
-        $wpdb->query(
+    if (!$event || !isset($event->data->reference) || !isset($event->event)) {
+        error_log(date('[Y-m-d H:i:s] ') . "Paystack webhook: Missing reference or event type");
+        return $response;
+    }
+
+    $reference = sanitize_text_field($event->data->reference);
+    $customer_email = sanitize_text_field($event->data->customer->email);
+    $event_type = sanitize_text_field($event->event);
+
+    if ($event_type === 'charge.success' || $event_type === 'transfer.success') {
+        $updated = $wpdb->query(
             $wpdb->prepare("
                 UPDATE $availability_table
                 SET status = 'b', hold_until = NULL
                 WHERE status = 'p' AND session_id = %s
             ", $reference)
         );
-        error_log("Transfer Succesful");
-        update_providers_availability_spots($session_id);
-    }
-    else{
-        $wpdb->query(
+
+        create_and_send_email($customer_email, $reference);
+
+        update_providers_availability_spots($reference);
+
+        error_log(date('[Y-m-d H:i:s] ') . "Paystack payment succeeded for session: $reference, availability rows updated: $updated");
+
+    } elseif ($event_type === 'charge.failed' || $event_type === 'transfer.failed') {
+        $booking_count = $wpdb->get_var(
             $wpdb->prepare("
-                DELETE FROM {$wpdb->prefix}bookings
-                WHERE availability_id IN (
-                    SELECT availability_id
-                    FROM {$wpdb->prefix}availability
-                    WHERE session_id = %s
-                )
+                SELECT COUNT(*) FROM $bookings_table b
+                JOIN $availability_table a ON b.availability_id = a.availability_id
+                WHERE a.session_id = %s
             ", $reference)
         );
-        $wpdb->query(
+        error_log(date('[Y-m-d H:i:s] ') . "Bookings to delete for session $reference: $booking_count");
+
+        $deleted = $wpdb->query(
+            $wpdb->prepare("
+                DELETE b FROM $bookings_table b
+                JOIN $availability_table a ON b.availability_id = a.availability_id
+                WHERE a.session_id = %s
+            ", $reference)
+        );
+        error_log(date('[Y-m-d H:i:s] ') . "Bookings deleted for session $reference: $deleted");
+
+        $updated = $wpdb->query(
             $wpdb->prepare("
                 UPDATE $availability_table
                 SET status = 'a',
@@ -1155,12 +1265,20 @@ function paystack_webhook(){
                     session_id = NULL
                 WHERE session_id = %s AND status = 'p'
             ", $reference)
-        );        
-        update_providers_availability_spots($session_id);
+        );
+        error_log(date('[Y-m-d H:i:s] ') . "Availability rows updated for session $reference: $updated");
+
+        update_providers_availability_spots($reference);
+
+        error_log(date('[Y-m-d H:i:s] ') . "Paystack payment failed for session: $reference");
+
+    } else {
+        error_log(date('[Y-m-d H:i:s] ') . "Paystack webhook received unhandled event: $event_type");
     }
 
-    exit();
+    return $response;
 }
+
 
 add_action('rest_api_init', function () {
     register_rest_route('pcp/v1', '/generate_session_id', [
@@ -1217,7 +1335,6 @@ function create_tables() {
         id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,        
         paystack_api_key_secret VARCHAR(255) NOT NULL,
         paystack_api_key_public VARCHAR(255),
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (id)
     ) $charset_collate;";
 
@@ -1230,7 +1347,7 @@ function create_tables() {
         paystack_subaccount VARCHAR(255),
         base_api_url TEXT NOT NULL,
         active BOOLEAN DEFAULT 1,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        sales_email VARCHAR(255),
         PRIMARY KEY (provider_id)
     ) $charset_collate;";
 
@@ -1312,6 +1429,7 @@ function provider_manager_page() {
         $provider_name = sanitize_text_field($_POST['provider_name']);
         $base_api_url = esc_url_raw($_POST['base_api_url']);
         $paystack_subaccount = sanitize_text_field($_POST['paystack_subaccount']);
+        $sales_email = sanitize_email($_POST['sales_email']);
         $api_key = create_api_key();
         $hmac_secret = create_hmac_secret();
 
@@ -1321,6 +1439,7 @@ function provider_manager_page() {
             'hmac_secret' => $hmac_secret,
             'base_api_url' => $base_api_url,
             'paystack_subaccount' => $paystack_subaccount,
+            'sales_email' => $sales_email,
         ]);
 
         echo '<div class="updated"><p>Provider added.</p></div>';
@@ -1350,8 +1469,9 @@ function provider_manager_page() {
     echo '<form method="post">
         <table class="form-table">
             <tr><th><label for="provider_name">Provider Name</label></th><td><input name="provider_name" required /></td></tr>
-            <tr><th><label for="base_api_url">Base URL</label></th><td><input name="base_api_url" required /></td></tr>
+            <tr><th><label for="base_api_url">Base API url</label></th><td><input name="base_api_url" required /></td></tr>
             <tr><th><label for="paystack_subaccount">Paystack Subaccount</label></th><td><input name="paystack_subaccount" required /></td></tr>
+            <tr><th><label for="sales_email">Sales Email</label></th><td><input name="sales_email" type="email" required /></td></tr>
         </table>
         <input type="submit" name="add_provider" class="button-primary" value="Add Provider" />
     </form>';
@@ -1360,7 +1480,7 @@ function provider_manager_page() {
         echo '<h2>Registered Providers</h2>';
         echo '<form method="post">';
         echo '<table class="widefat">';
-        echo '<thead><tr><th>ID</th><th>Name</th><th>Base URL</th><th>Paystack Subaccount</th><th>API Key</th><th>HMAC Secret</th><th>Active</th><th>Actions</th></tr></thead><tbody>';
+        echo '<thead><tr><th>ID</th><th>Name</th><th>Base API url</th><th>Sales Email</th><th>Paystack Subaccount</th><th>API Key</th><th>HMAC Secret</th><th>Active</th><th>Actions</th></tr></thead><tbody>';
 
         foreach ($providers as $p) {
             $api_key_id = 'api_key_' . $p->provider_id;
@@ -1370,7 +1490,7 @@ function provider_manager_page() {
             echo '<td>' . esc_html($p->provider_id) . '</td>';
             echo '<td>' . esc_html($p->provider_name) . '</td>';
             echo '<td>' . esc_url($p->base_api_url) . '</td>';
-
+            echo '<td>' . esc_html($p->sales_email) . '</td>';
             echo '<td>' . esc_html($p->paystack_subaccount) . '</td>';
 
             echo '<td><span class="key-container">
@@ -1967,6 +2087,55 @@ function provider_update_service_spots_availability(WP_REST_Request $request){
     return new WP_REST_Response(['message' => 'Availability slots inserted successfully'], 201);
 }
 
+add_action('rest_api_init', function () {
+    register_rest_route('api/v1', '/provider_get_all_service_spots_availability', [
+        'methods' => 'GET',
+        'callback' => 'provider_get_all_service_spots_availability',
+        'permission_callback' => '__return_true', // Custom auth will be handled in function
+    ]);
+});
+
+//For provider to get all the available spots for a service
+function provider_get_all_service_spots_availability(WP_REST_Request $request){
+    $data = verify_and_decrypt_response($request);
+
+    if ($data instanceof WP_REST_Response) {
+        return $data;
+    }
+
+    $body_data = $data['body_data'];
+    $provider_row = $data['provider_row'];
+    $provider_id = $provider_row->provider_id;
+    $service_name = $body_data['service_name'] ?? null;
+    if(!isset($service_name))
+    {
+        return new WP_REST_Response(['message' => 'service_name not found (sent incorretly?)'], 404);
+    }
+    $service_id = $wpdb->get_var(
+        $wpdb->prepare("SELECT service_id FROM {$wpdb->prefix}services WHERE provider_id = %d AND service_name = %s", $provider_id, $service_name)
+    );
+    if(empty($service_id))
+    {
+        return new WP_REST_Response(['message' => 'No service found in DB '], 500);
+    }
+
+    $availability_results = $wpdb->get_results(
+            $wpdb->prepare("
+                SELECT status, provider_db_id AS id, available_date AS date, time_slot, time_slot_length_min 
+                FROM $availability_table                
+                WHERE service_id = %d
+            ", $service_id),
+            ARRAY_A
+        );
+
+    $availability = [
+        'service_name' => $service_name,
+        'dates_availability' => $availability_results,
+    ];
+
+    return new WP_REST_Response($availability, 200);
+}
+
 //==================
 //PROVIDER ENDPOINTS
 //==================
@@ -1974,8 +2143,6 @@ function provider_update_service_spots_availability(WP_REST_Request $request){
 //ADD UPDATE
 //Add to all udpates to db through bookings 
 function main_update_services_availability($provider_info){   
-    //DO NOTHING FOR NOW
-    /*
 
     $base_api_url = $provider_info['base_api_url'];
     $endpoint = $base_api_url . "/main_update_service_availability";
@@ -1994,7 +2161,7 @@ function main_update_services_availability($provider_info){
 
     $payload_array = [
         'dates_availability' => $dates_availability,
-    ];
+    ];    
 
     $payload_json = json_encode($payload_array);
 
@@ -2036,7 +2203,6 @@ function main_update_services_availability($provider_info){
         'success' => true,
         'data' => $body_json,
     ];
-    */
 }
 
 function verify_and_decrypt_response($request){
@@ -2083,6 +2249,7 @@ function get_providers_with_db_id_and_status_by_session($session_id) {
             p.api_key,
             p.hmac_secret,
             p.base_api_url,
+            p.sales_email,
             a.provider_db_id,
             a.status
         FROM {$wpdb->prefix}provider_sites p
@@ -2099,10 +2266,12 @@ function get_providers_with_db_id_and_status_by_session($session_id) {
     foreach ($rows as $row) {
         if (!isset($result[$row->provider_id])) {
             $result[$row->provider_id] = [
+                'provider_id' => $row->provider_id,
                 'provider_name' => $row->provider_name,
                 'api_key' => $row->api_key,
                 'hmac_secret' => $row->hmac_secret,
                 'base_api_url' => $row->base_api_url,
+                'sales_email' => $row->sales_email,
                 'availabilities' => [],
             ];
         }
@@ -2120,7 +2289,7 @@ function update_providers_availability_spots($session_id) {
     $providers = get_providers_with_db_id_and_status_by_session($session_id);
 
     foreach ($providers as $provider_id => $provider_info) {
-        main_update_services_availability($provider_info);
+        main_update_services_availability($provider_info);     
     }
 }
 
@@ -2136,20 +2305,368 @@ function create_hmac_secret() {
     return bin2hex(random_bytes(32));
 }
 
+function create_and_send_email($to, $session_id){
+    create_and_send_provider_emails($session_id);  
+    global $wpdb;
+
+    $query = $wpdb->prepare("
+        SELECT 
+            a.available_date,
+            a.time_slot,
+            a.time_slot_length_min,
+            a.service_id,
+            s.service_name,
+            s.provider_id,
+            p.provider_name
+        FROM {$wpdb->prefix}availability a
+        INNER JOIN {$wpdb->prefix}services s ON a.service_id = s.service_id
+        INNER JOIN {$wpdb->prefix}provider_sites p ON s.provider_id = p.provider_id
+        WHERE a.session_id = %s
+    ", $session_id);
+
+    $results = $wpdb->get_results($query, ARRAY_A);
+
+    if (!$results) {
+        error_log("No availability found for session_id: $session_id");
+        return;
+    }
+
+    $message = generate_html_email_from_availability($results, $session_id);
+
+    $subject = 'Tickets!';
+    $headers = array('Content-Type: text/html; charset=UTF-8');
+
+    $sent = wp_mail($to, $subject, $message, $headers);
+    if (!$sent) {
+        error_log("wp_mail failed to send to $to");
+    }
+}
+
+function generate_html_email_from_availability($availability_rows, $session_id) {
+    $grouped = [];
+
+    // Group by provider and then service
+    foreach ($availability_rows as $row) {
+        $provider = $row['provider_name'];
+        $service = $row['service_name'];
+
+        // Calculate to_time
+        $start_time = DateTime::createFromFormat('H:i:s', $row['time_slot']);
+        $from_time = $start_time->format('H:i');
+        $start_time->modify("+" . $row['time_slot_length_min'] . " minutes");
+        $to_time = $start_time->format('H:i');
+
+        $grouped[$provider][$service][] = [
+            'available_date' => $row['available_date'],
+            'from_time' => $from_time,
+            'to_time' => $to_time,
+        ];
+    }
+
+    // Start HTML output
+    $html = '<html><body style="font-family: Arial, sans-serif;">';
+    $html .= '<h2 style="color:#2c3e50;">Tickets</h2>';
+        $html .= '<p style="font-size:14px;color:#555;"><strong>Reference code:</strong> ' . esc_html($session_id) . '</p>';
+
+    foreach ($grouped as $provider_name => $services) {
+        $html .= "<h3 style='color:#2980b9;'>$provider_name</h3>";
+
+        foreach ($services as $service_name => $tickets) {
+            $html .= "<h4 style='color:#27ae60;margin-left:20px;'>$service_name</h4>";
+            $html .= "<ul style='margin-left:40px;'>";
+
+            foreach ($tickets as $ticket) {
+                $html .= "<li><strong>Date:</strong> {$ticket['available_date']} | 
+                          <strong>Time:</strong> {$ticket['from_time']} - {$ticket['to_time']}</li>";
+            }
+
+            $html .= "</ul>";
+        }
+    }
+
+    $html .= '</body></html>';
+
+    return $html;
+}
+
+function create_and_send_provider_emails($session_id){
+    global $wpdb;
+
+    // Step 1: Get all unique providers in the session
+    $providers = $wpdb->get_results($wpdb->prepare("
+        SELECT DISTINCT p.provider_id, ps.sales_email
+        FROM {$wpdb->prefix}provider_sites ps
+        INNER JOIN {$wpdb->prefix}services s ON s.provider_id = ps.provider_id
+        INNER JOIN {$wpdb->prefix}availability a ON a.service_id = s.service_id
+        INNER JOIN {$wpdb->prefix}provider_sites p ON p.provider_id = ps.provider_id
+        WHERE a.session_id = %s
+    ", $session_id));
+
+    if (!$providers) {
+        error_log("No providers found for session_id: $session_id");
+        return;
+    }
+
+    // Step 2: Loop through each provider
+    foreach ($providers as $provider) {
+        $provider_id = $provider->provider_id;
+        $sales_email = $provider->sales_email;
+
+        // Fetch only this provider's availability rows for the session
+        $availability_rows = $wpdb->get_results($wpdb->prepare("
+            SELECT 
+                a.available_date,
+                a.time_slot,
+                a.time_slot_length_min,
+                a.provider_db_id,
+                a.service_id,
+                a.status,
+                s.service_name,
+                p.provider_name
+            FROM {$wpdb->prefix}availability a
+            INNER JOIN {$wpdb->prefix}services s ON a.service_id = s.service_id
+            INNER JOIN {$wpdb->prefix}provider_sites p ON s.provider_id = p.provider_id
+            WHERE a.session_id = %s AND s.provider_id = %d
+        ", $session_id, $provider_id), ARRAY_A);
+
+        if (!$availability_rows) {
+            error_log("No availability rows for provider_id $provider_id and session_id $session_id");
+            continue;
+        }
+
+        // Generate and send the email
+        $message = generate_html_email_for_provider($availability_rows, $session_id);
+
+        $subject = 'Booked Tickets Receipt!';
+        $headers = array('Content-Type: text/html; charset=UTF-8');
+
+        $sent = wp_mail($sales_email, $subject, $message, $headers);
+        if (!$sent) {
+            error_log("wp_mail failed to send provider email to $sales_email for provider_id $provider_id");
+        }
+    }
+}
+
+
+
+function generate_html_email_for_provider($availability_rows, $session_id) {
+    $grouped = [];
+
+    // Group by service
+    foreach ($availability_rows as $row) {
+        $service = $row['service_name'];
+
+        // Calculate from_time and to_time
+        $start_time = DateTime::createFromFormat('H:i:s', $row['time_slot']);
+        $from_time = $start_time->format('H:i');
+        $start_time->modify("+" . $row['time_slot_length_min'] . " minutes");
+        $to_time = $start_time->format('H:i');
+
+        $grouped[$service][] = [
+            'available_date' => $row['available_date'],
+            'from_time' => $from_time,
+            'to_time' => $to_time,
+            'provider_db_id' => $row['provider_db_id'],
+            'status' => $row['status'],
+        ];
+    }
+
+    // Start HTML output
+    $html = '<html><body style="font-family: Arial, sans-serif;">';
+    $html .= '<h2 style="color:#2c3e50;">Tickets Summary</h2>';
+    $html .= '<p style="font-size:14px;color:#555;"><strong>Reference Code:</strong> ' . esc_html($session_id) . '</p>';
+
+    foreach ($grouped as $service_name => $tickets) {
+        $html .= "<h4 style='color:#27ae60;margin-left:20px;'>Service: " . esc_html($service_name) . "</h4>";
+        $html .= "<table style='margin-left:40px;border-collapse:collapse;width:80%;'>";
+        $html .= "<thead><tr>
+                    <th style='border:1px solid #ccc;padding:8px;'>ID</th>
+                    <th style='border:1px solid #ccc;padding:8px;'>Date</th>
+                    <th style='border:1px solid #ccc;padding:8px;'>Time</th>
+                    <th style='border:1px solid #ccc;padding:8px;'>Status</th>
+                  </tr></thead><tbody>";
+
+        foreach ($tickets as $ticket) {
+            $html .= "<tr>
+                        <td style='border:1px solid #ccc;padding:8px;'>{$ticket['provider_db_id']}</td>
+                        <td style='border:1px solid #ccc;padding:8px;'>{$ticket['available_date']}</td>
+                        <td style='border:1px solid #ccc;padding:8px;'>{$ticket['from_time']} - {$ticket['to_time']}</td>
+                        <td style='border:1px solid #ccc;padding:8px;'>{$ticket['status']}</td>
+                      </tr>";
+        }
+
+        $html .= "</tbody></table><br/>";
+    }
+
+    $html .= '</body></html>';
+
+    return $html;
+}
+
+
+
+
 
 //=========
 //CRON
 //=========
-/*
+
 function pcp_release_expired_pending() {
     global $wpdb;
-    $availability_table = $wpdb->prefix . 'availability';
+    $availability_table = "{$wpdb->prefix}availability";
+    $bookings_table = "{$wpdb->prefix}bookings";
 
-    $wpdb->query("
-        UPDATE $availability_table
-        SET status = 'a', hold_until = NULL
+    // Get expired pending availability slots
+    $expired_rows = $wpdb->get_results("
+        SELECT availability_id, session_id 
+        FROM $availability_table 
         WHERE status = 'p' AND hold_until < NOW()
     ");
+
+    $touched_sessions = [];
+    $verified_sessions = [];  // Cache to store verification results by session_id
+    $emails_sent = [];        // To ensure email sent once per session_id
+    $customer_emails = [];    // Cache customer emails per session_id
+
+    foreach ($expired_rows as $row) {
+        $availability_id = $row->availability_id;
+        $session_id = $row->session_id;
+
+        $has_booking = $wpdb->get_var($wpdb->prepare("
+            SELECT COUNT(*) FROM $bookings_table 
+            WHERE availability_id = %d
+        ", $availability_id));
+
+        if ($has_booking && $session_id) {
+            // Cache customer email per session_id to avoid redundant queries
+            if (!isset($customer_emails[$session_id])) {
+                $customer_emails[$session_id] = $wpdb->get_var($wpdb->prepare("
+                    SELECT customer_email FROM $bookings_table 
+                    WHERE availability_id = %d LIMIT 1
+                ", $availability_id));
+            }
+            $customer_email = $customer_emails[$session_id];
+
+            if (!isset($verified_sessions[$session_id])) {
+                // Verify payment once per session_id
+                $verification_result = pcp_manual_paystack_verify($session_id);
+                $verified_sessions[$session_id] = $verification_result;
+
+                // Send email only once if verification successful and email exists
+                if ($verification_result['success'] && $customer_email && !isset($emails_sent[$session_id])) {
+                    create_and_send_email($customer_email, $session_id);
+                    $emails_sent[$session_id] = true;
+                }
+            } else {
+                $verification_result = $verified_sessions[$session_id];
+            }
+
+            if (!$verification_result['success']) {
+                if (in_array($verification_result['status'], ['abandoned', 'failed', 'cancelled'])) {
+                    // Release availability slot and delete booking
+                    $wpdb->query($wpdb->prepare("
+                        UPDATE $availability_table
+                        SET session_id = NULL,
+                            status = 'a',
+                            hold_until = NULL
+                        WHERE availability_id = %d
+                        AND status = 'p'
+                        AND hold_until < NOW()
+                    ", $availability_id));
+
+                    $wpdb->delete($bookings_table, [
+                        'availability_id' => $availability_id
+                    ], ['%d']);
+
+                    $touched_sessions[] = $session_id;
+                }
+                continue;
+            } else {
+                // Payment successful, mark as booked
+                $wpdb->query($wpdb->prepare("
+                    UPDATE $availability_table
+                    SET status = 'b'
+                    WHERE availability_id = %d
+                    AND status = 'p'
+                    AND hold_until < NOW()
+                ", $availability_id));
+
+                $touched_sessions[] = $session_id;
+            }
+
+            continue;
+        }
+
+        // No booking or session, release slot
+        $wpdb->query($wpdb->prepare("
+            UPDATE $availability_table
+            SET session_id = NULL,
+                status = 'a',
+                hold_until = NULL
+            WHERE availability_id = %d
+            AND status = 'p'
+            AND hold_until < NOW()
+        ", $availability_id));
+
+        if (!empty($session_id)) {
+            $touched_sessions[] = $session_id;
+        }
+    }
+
+    // Remove duplicate session ids
+    $touched_sessions = array_unique($touched_sessions);
+
+    // Update availability spots for all touched sessions
+    foreach ($touched_sessions as $sess_id) {
+        update_providers_availability_spots($sess_id);
+    }
+}
+
+function pcp_manual_paystack_verify($reference) {
+    global $wpdb;
+
+    $paystack_secret = $wpdb->get_var("
+        SELECT paystack_api_key_secret
+        FROM {$wpdb->prefix}paystack_info
+        WHERE id = 1
+    ");
+
+    $curl = curl_init();
+
+    curl_setopt_array($curl, array(
+        CURLOPT_URL => "https://api.paystack.co/transaction/verify/" . $reference,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER => array(
+            "Authorization: Bearer $paystack_secret",
+            "Cache-Control: no-cache",
+        ),
+        CURLOPT_TIMEOUT => 15,
+    ));
+
+    $response = curl_exec($curl);
+    $err = curl_error($curl);
+    curl_close($curl);
+
+    if ($err) {
+        error_log("Paystack cURL error: " . $err);
+        return ['success' => false, 'status' => 'unknown', 'error' => $err];
+    }
+
+    $result = json_decode($response, true);
+    if (!$result || !isset($result['status']) || !$result['data']) {
+        return ['success' => false, 'status' => 'unknown', 'error' => 'Invalid API response'];
+    }
+
+    $paystack_status = $result['data']['status'];
+
+    if ($paystack_status === 'success') {
+        return ['success' => true, 'status' => 'success'];
+    } elseif (in_array($paystack_status, ['abandoned', 'failed', 'cancelled'])) {
+        return ['success' => false, 'status' => $paystack_status];
+    } else {
+        // ongoing, pending, processing
+        return ['success' => false, 'status' => $paystack_status];
+    }
 }
 
 add_filter('cron_schedules', function($schedules) {
@@ -2171,8 +2688,6 @@ register_activation_hook(__FILE__, function() {
 register_deactivation_hook(__FILE__, function() {
     wp_clear_scheduled_hook('pcp_release_pending_cron');
 });
-*/
-
 
 
 
