@@ -47,7 +47,7 @@ function pcp_custom_calendar_shortcode() {
     $providers = $wpdb->get_results("SELECT * FROM {$wpdb->prefix}provider_sites");     
 
     ob_start(); ?>
-
+    <div class="calendar-scroll-wrapper">
     <div id="calendar-container">
         <label for="provider-select">Select Provider:</label>
         <select id="provider-select">
@@ -102,15 +102,15 @@ function pcp_custom_calendar_shortcode() {
     <div id="client-info-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background-color:rgba(0,0,0,0.6); z-index:9999; align-items:center; justify-content:center;">
         <div style="background:#fff; padding:20px; border-radius:8px; max-width:300px; width:90%; box-shadow:0 4px 10px rgba(0,0,0,0.2);">
             <h3 style="margin-top:0;">Enter Details to continue</h3>
-            <label>Name:</label><br>
+            <label for="client-name">Name:</label><br>
             <input type="text" id="client-name" style="width:100%; padding:8px; margin-bottom:10px;"><br>
-            <label>Email:</label><br>
+            <label for="client-name">Email:</label><br>
             <input type="email" id="client-email" style="width:100%; padding:8px;"><br><br>
             <button id="submit-client-info" style="padding:8px 12px;">Continue</button>
             <button id="cancel-client-info" style="padding:8px 12px; background:#ccc; margin-left:10px;">Cancel</button>
         </div>
     </div>
-    
+    </div>
 
     <?php
     return ob_get_clean();
@@ -123,6 +123,7 @@ add_action('rest_api_init', function () {
         'permission_callback' => '__return_true', // public endpoint, no auth needed (adjust if necessary)
     ]);
 });
+
 function pcp_rest_get_services(WP_REST_Request $request) {
     global $wpdb;
 
@@ -267,30 +268,42 @@ function provider_admin_custom_calendar() {
 
     ob_start();
     ?>
+    <div class="calendar-scroll-wrapper">
+        <div id="calendar-container">
+            <label for="service-select">Select Service:</label>
+            <select id="service-select">
+                <option value="">-- Select Service --</option>
+                <?php foreach ($services as $service): ?>
+                    <option value="<?= esc_attr($service->service_id); ?>">
+                        <?= esc_html($service->service_name); ?>
+                    </option>
+                <?php endforeach; ?>
+            </select>
 
-    <div id="calendar-container">
-        <label for="service-select">Select Service:</label>
-        <select id="service-select">
-            <option value="">-- Select Service --</option>
-            <?php foreach ($services as $service): ?>
-                <option value="<?= esc_attr($service->service_id); ?>">
-                    <?= esc_html($service->service_name); ?>
-                </option>
-            <?php endforeach; ?>
-        </select>
-
-        <div id="calendar-controls" style="display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin: 10px 0;">
-            <button id="prev-month" disabled>&laquo; Previous</button>
-            <span id="calendar-title" style="font-weight: bold;"></span>
-            <button id="next-month">Next &raquo;</button>
-        </div>
-
-        <div id="my-calendar">
-            <div class="calendar-header">
-                <div>Monday</div><div>Tuesday</div><div>Wednesday</div><div>Thursday</div>
-                <div>Friday</div><div>Saturday</div><div>Sunday</div>
+            <div id="calendar-controls" style="display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin: 10px 0;">
+                <button id="prev-month" disabled>&laquo; Previous</button>
+                <span id="calendar-title" style="font-weight: bold;"></span>
+                <button id="next-month">Next &raquo;</button>
             </div>
-            <div class="calendar-body" id="calendar-body"></div>
+
+            <div id="my-calendar">
+                <div class="calendar-header">
+                    <div>Monday</div><div>Tuesday</div><div>Wednesday</div><div>Thursday</div>
+                    <div>Friday</div><div>Saturday</div><div>Sunday</div>
+                </div>
+                <div class="calendar-body" id="calendar-body"></div>
+            </div>
+        </div>
+        <div id="client-info-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background-color:rgba(0,0,0,0.6); z-index:9999; align-items:center; justify-content:center;">
+            <div style="background:#fff; padding:20px; border-radius:8px; max-width:300px; width:90%; box-shadow:0 4px 10px rgba(0,0,0,0.2);">
+                <h3 style="margin-top:0;">Enter Details to continue</h3>
+                <label>Name:</label><br>
+                <input type="text" id="client-name" style="width:100%; padding:8px; margin-bottom:10px;"><br>
+                <label>Email/Phone number:</label><br>
+                <input type="email" id="client-email" style="width:100%; padding:8px;"><br><br>
+                <button id="submit-client-info" style="padding:8px 12px;">Continue</button>
+                <button id="cancel-client-info" style="padding:8px 12px; background:#ccc; margin-left:10px;">Cancel</button>
+            </div>
         </div>
     </div>
 
@@ -308,10 +321,89 @@ function provider_admin_custom_calendar() {
         const calendarTitle = document.getElementById('calendar-title');
         const prevBtn = document.getElementById('prev-month');
         const nextBtn = document.getElementById('next-month');
+        const clientModal = document.getElementById("client-info-modal");
+        const continueBtn = document.getElementById("submit-client-info");
+        const cancelBtn = document.getElementById("cancel-client-info");
+
+        const shortWeekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+        const fullWeekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+        function updateWeekdays() {
+            const headerDivs = document.querySelectorAll(".calendar-header > div");
+            if (window.innerWidth <= 600) {
+            headerDivs.forEach((div, i) => div.textContent = shortWeekdays[i]);
+            } else {
+            headerDivs.forEach((div, i) => div.textContent = fullWeekdays[i]);
+            }
+        }
+
+        // Initial run
+        updateWeekdays();
+
+        // Update on window resize
+        window.addEventListener("resize", updateWeekdays);
+        let currentSelectedId;
 
         let currentYear = new Date().getFullYear();
         let currentMonth = new Date().getMonth();
         const today = new Date();
+
+        continueBtn.addEventListener("click", function () {
+            const name = document.getElementById("client-name").value.trim();
+            const email = document.getElementById("client-email").value.trim();
+
+            if (!name || !email) {
+            alert("Please fill in both name and email.");
+            return;
+            }
+
+
+            fetch(rest_object.rest_url + 'admin/book_spot_available', {
+                                    method: 'POST',
+                                    headers: {
+                                        'Content-Type': 'application/json',
+                                        'X-WP-Nonce': rest_object.nonce,
+                                    },
+                                    body: JSON.stringify({
+                                        availability_id: currentSelectedId,
+                                        customer_name: name,
+                                        customer_email: email,
+                                    }),
+                                })
+                                .then(res => res.json())
+                                .then(data => {
+                                    if (data.success) {
+                                        updateCalendar();
+                                        clientModal.style.display = 'none';                                        
+                                        alert(data.message);                                        
+                                        /*
+                                        btn.textContent = "Booked!";
+                                        btn.classList.add("booked-wave");
+                                        btn.disabled = true;
+
+                                        btn.style.opacity = "1";
+                                        btn.style.pointerEvents = "auto";
+
+                                        setTimeout(() => {
+                                            btn.classList.remove("booked-wave");
+                                            btn.disabled = false;
+                                            updateCalendar();
+                                        }, 1000);
+                                        */
+                                    } else {
+                                        alert("Error: " + (data.message || 'Unknown error'));
+                                    }
+                                })
+                                .catch(err => {
+                                    alert('An unexpected error occurred.');
+                                });
+
+                                
+        });
+
+        cancelBtn.addEventListener("click", function () {
+            clientModal.style.display = "none"; // close modal
+        });
 
         prevBtn.addEventListener('click', () => {
             if (currentMonth === 0) {
@@ -428,7 +520,7 @@ function provider_admin_custom_calendar() {
                         const btn = document.createElement("button");
                         btn.classList.add("book-btn");
                         btn.dataset.spots_info = JSON.stringify(slot.spots);
-                        btn.textContent = "Book Now";
+                        btn.textContent = "Book";
 
                         // Styling for button (same as your styles)
                         Object.assign(btn.style, {
@@ -441,7 +533,7 @@ function provider_admin_custom_calendar() {
                             color: "white",
                             border: "none",
                             borderRadius: "4px",
-                            fontSize: "11px",
+                            fontSize: "14px",
                             display: "flex",
                             justifyContent: "center",
                             alignItems: "center",
@@ -453,6 +545,7 @@ function provider_admin_custom_calendar() {
                         });
 
                         btn.addEventListener("click", (e) => {
+                            currentSelectedId = -1;
                             const spotsInfoStr = e.target.dataset.spots_info;
                             const all_spots_info = JSON.parse(spotsInfoStr);
                             let selectedAvailabilityId = null;
@@ -469,39 +562,11 @@ function provider_admin_custom_calendar() {
                                 if (!confirmed) {
                                     return;
                                 }
+                                
+                                //ADD UPDATE
+                                currentSelectedId = selectedAvailabilityId;
 
-                                fetch(rest_object.rest_url + 'admin/book_spot_available', {
-                                    method: 'POST',
-                                    headers: {
-                                        'Content-Type': 'application/json',
-                                        'X-WP-Nonce': rest_object.nonce,
-                                    },
-                                    body: JSON.stringify({
-                                        availability_id: selectedAvailabilityId,
-                                    }),
-                                })
-                                .then(res => res.json())
-                                .then(data => {
-                                    if (data.success) {
-                                        btn.textContent = "Booked!";
-                                        btn.classList.add("booked-wave");
-                                        btn.disabled = true;
-
-                                        btn.style.opacity = "1";
-                                        btn.style.pointerEvents = "auto";
-
-                                        setTimeout(() => {
-                                            btn.classList.remove("booked-wave");
-                                            btn.disabled = false;
-                                            updateCalendar();
-                                        }, 1000);
-                                    } else {
-                                        alert("Error: " + (data.message || 'Unknown error'));
-                                    }
-                                })
-                                .catch(err => {
-                                    alert('An unexpected error occurred.');
-                                });
+                                clientModal.style.display = "flex";
                             }
                         });
 
@@ -643,6 +708,77 @@ function provider_admin_custom_calendar() {
             cursor: pointer;
             background-color: #67c2ff;
         }
+
+        /* --- MOBILE FIXES --- */
+        @media (max-width: 900px) {
+        /* Make day cells taller so slots don't squeeze */
+        .day-cell {
+            min-height: auto;
+            padding: 2px;
+            font-size: 12px;
+        }
+
+        /* Stack slots vertically like cards instead of tables */
+        .slots-wrapper {
+            margin-top: 2px;
+            border-width: 1px;
+        }
+
+        .slots-table {
+            display: block;
+            width: 100%;
+            font-size: 13px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            margin-bottom: 6px;
+            overflow: hidden;
+        }
+
+        .slots-table tr {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            padding: 6px;
+        }
+
+        .slots-table td {
+            display: block;
+            width: 100%;
+            padding: 2px 3px;
+            text-align: left;
+            border: none !important;
+        }
+
+        .slots-table td.time-cell {
+            padding: 0px 1px;
+            font-weight: bold;
+            background: none;
+            white-space: normal;
+            font-size: 12px;
+        }
+
+        .slots-table td.spots {
+            background: none;
+            padding: 0px 1px;
+            font-size: 12px;
+        }
+
+        /* Make Book button always visible (no hover dependency) */
+        .book-btn {
+        position: relative !important;
+        opacity: 1 !important;
+        pointer-events: auto !important;
+        display: inline-block;          
+        margin-top: 2px;
+        padding: 0px 2px;              
+        font-size: 12px !important;     
+        white-space: normal;            
+        max-width: 100%;                
+        overflow: hidden;
+        box-sizing: border-box;
+        }
+
+        }
     </style>
 
     <?php
@@ -693,25 +829,42 @@ add_action('rest_api_init', function () {
     }
 
     return $service->provider_id == $provider->provider_id;
-},
-    ]);
+    },
+        ]);
 });
 
 function admin_book_spot_available_rest(WP_REST_Request $request) {
     global $wpdb;
 
     $availability_id = intval($request->get_param('availability_id'));
-    if (!$availability_id) {
+    $customer_name = sanitize_text_field($request->get_param('customer_name'));
+    $customer_email = sanitize_text_field($request->get_param('customer_email'));
+
+    if (!$availability_id || $availability_id == -1) {
         return new WP_REST_Response([
             'success' => false,
             'message' => 'Missing spot ID',
+        ], 400);
+    }
+    if (!$customer_name) {
+        return new WP_REST_Response([
+            'success' => false,
+            'message' => 'Missing customer name',
+        ], 400);
+    }
+    if (!$customer_email) {
+        return new WP_REST_Response([
+            'success' => false,
+            'message' => 'Missing customer email',
         ], 400);
     }
 
     $availability_table = $wpdb->prefix . 'availability';
 
     $updated = $wpdb->query(
-        $wpdb->prepare("UPDATE $availability_table SET status = 'b' WHERE availability_id = %d AND status = 'a'", $availability_id)
+        $wpdb->prepare("UPDATE $availability_table
+        SET status = 'b'
+        WHERE availability_id = %d AND status = 'a'", $availability_id)
     );
 
     if ($updated === false) {
@@ -727,6 +880,36 @@ function admin_book_spot_available_rest(WP_REST_Request $request) {
             'message' => 'Spot not available or already booked',
         ], 409);
     }
+
+    $bookings_table = $wpdb->prefix . 'bookings';
+
+    $booking_update = null;
+
+    if ($updated) {
+        $booking_update = $wpdb->insert(
+            $bookings_table,
+            [
+                'availability_id' => $availability_id,
+                'booked_by_main'  => 0,
+                'customer_name'   => $customer_name,
+                'customer_email'  => $customer_email,
+                'created_at'      => current_time('mysql')
+            ]
+        );
+
+        if($booking_update === false){
+            $wpdb->query(
+                $wpdb->prepare("UPDATE $availability_table
+                SET status = 'a'
+                WHERE availability_id = %d AND status = 'b'", $availability_id)
+            );
+
+            return new WP_REST_Response([
+                'success' => false,
+                'message' => 'Database error in bookings table, rolled back',
+            ], 500);
+        }
+    }    
 
     return rest_ensure_response([
         'success' => true,
@@ -939,7 +1122,7 @@ function pcp_verify_payment($request){
         $wpdb->update($table, ['status' => 'b'], ['availability_id' => $row->availability_id]);
         create_and_send_email($customer_email, $reference);
         return new WP_REST_Response(['success' => true, 'message' => 'Payment verified successfully']);
-    } else {
+    } else{
         $wpdb->update($table, ['status' => 'a'], ['availability_id' => $row->availability_id]);
         return new WP_REST_Response(['success' => false, 'message' => 'Payment verification failed'], 400);
     }
@@ -1086,11 +1269,10 @@ function pcp_rest_init_payment($request) {
             'response' => $response_data
         ], 500);
     }
-
-    // Give user 15 minutes to complete payment
+    //Set hold unitl to null as uesr can take as long as they like to do payment, webhook or cron will verify
     $wpdb->query($wpdb->prepare("
         UPDATE {$wpdb->prefix}availability
-        SET hold_until = DATE_ADD(NOW(), INTERVAL 5 MINUTE)
+        SET hold_until = NULL
         WHERE session_id = %s
     ", $session_id));
 
@@ -1615,8 +1797,8 @@ function provider_services_manager_page() {
         $service_cost_provider = floatval($_POST['service_cost']);
         $max_spots = intval($_POST['max_spots']);
 
-        // Round up to nearest 10 after adding 8.5%
-        $service_cost_main = ceil(($service_cost_provider * 1.085) / 10) * 10;
+        // Round up to nearest 1 after adding 10%
+        $service_cost_main = ceil($service_cost_provider * 1.1);
 
         $existing = $wpdb->get_var($wpdb->prepare(
             "SELECT COUNT(*) FROM $services_table WHERE service_name = %s AND provider_id = %d",
@@ -1657,7 +1839,7 @@ function provider_services_manager_page() {
     if (isset($_POST['edit_service_submit'])) {
         $edit_id = intval($_POST['edit_service_id']);
         $new_cost_provider = floatval($_POST['new_service_cost_provider']);
-        $new_cost_main = ceil(($new_cost_provider * 1.085) / 10) * 10;
+        $new_cost_main = ceil($new_cost_provider * 1.1);
 
         $valid = $wpdb->get_var($wpdb->prepare(
             "SELECT COUNT(*) FROM $services_table WHERE service_id = %d AND provider_id = %d",
@@ -1963,6 +2145,171 @@ function provider_service_time_slots_page() {
     echo do_shortcode('[provider_admin_custom_calendar]');
     echo '</div>';
 }
+
+add_action('admin_menu', 'provider_bookings_dashboard_menu');
+function provider_bookings_dashboard_menu() {
+    if (current_user_can('provider')) {
+        add_menu_page(
+            'Bookings Dashboard',
+            'Bookings',
+            'read',
+            'provider-bookings-dashboard',
+            'provider_bookings_dashboard_page',
+            'dashicons-calendar-alt',
+            4
+        );
+    }
+}
+
+function provider_bookings_dashboard_page() {
+    global $wpdb;
+
+    $providers_table   = $wpdb->prefix . 'provider_sites';
+    $services_table    = $wpdb->prefix . 'services';
+    $availability_table = $wpdb->prefix . 'availability';
+    $bookings_table    = $wpdb->prefix . 'bookings';
+
+    $current_user = wp_get_current_user();
+    $username     = $current_user->user_login;
+
+    // Get provider
+    $provider = $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM {$providers_table} WHERE provider_name = %s",
+        $username
+    ));
+
+    if (!$provider) {
+        echo '<div class="notice notice-error"><p>Provider not found.</p></div>';
+        return;
+    }
+
+    $provider_id = $provider->provider_id;
+
+    // Get services for provider
+    $services = $wpdb->get_results($wpdb->prepare(
+        "SELECT * FROM {$services_table} WHERE provider_id = %d",
+        $provider_id
+    ));
+
+    // Handle form filters
+    $from_date = isset($_POST['from_date']) && $_POST['from_date'] !== ''
+        ? sanitize_text_field($_POST['from_date'])
+        : date('Y-m-d');
+    $to_date   = isset($_POST['to_date']) && $_POST['to_date'] !== ''
+        ? sanitize_text_field($_POST['to_date'])
+        : null;
+    $service_filter = isset($_POST['service_id']) ? intval($_POST['service_id']) : 0;
+
+    // New booked_by filter: 0 = All, 1 = Website (booked_by_main=1), 2 = Private (booked_by_main=0)
+    $booked_by_filter = isset($_POST['booked_by']) ? intval($_POST['booked_by']) : 0;
+
+    // Build SQL conditions
+    $conditions = [];
+    $params     = [];
+
+    $conditions[] = "s.provider_id = %d";
+    $params[]     = $provider_id;
+
+    if ($from_date) {
+        $conditions[] = "a.available_date >= %s";
+        $params[]     = $from_date;
+    }
+    if ($to_date) {
+        $conditions[] = "a.available_date <= %s";
+        $params[]     = $to_date;
+    }
+    if ($service_filter > 0) {
+        $conditions[] = "s.service_id = %d";
+        $params[]     = $service_filter;
+    }
+
+    // Add booked_by filter condition
+    if ($booked_by_filter === 1) {
+        // Website bookings only
+        $conditions[] = "b.booked_by_main = 1";
+    } elseif ($booked_by_filter === 2) {
+        // Private bookings only
+        $conditions[] = "b.booked_by_main = 0";
+    }
+    // 0 = all, no condition added
+
+    $where_sql = "WHERE " . implode(" AND ", $conditions);
+
+    // Query bookings
+    $query = "
+        SELECT 
+            a.available_date AS booking_date,
+            s.service_name,
+            b.booked_by_main,
+            b.customer_name,
+            b.customer_email,
+            a.session_id
+        FROM {$bookings_table} b
+        INNER JOIN {$availability_table} a ON b.availability_id = a.availability_id
+        INNER JOIN {$services_table} s ON a.service_id = s.service_id
+        $where_sql
+        ORDER BY a.available_date ASC, s.service_name ASC
+    ";
+
+    $results = $wpdb->get_results($wpdb->prepare($query, $params));
+
+    // Render page
+    echo '<div class="wrap"><h1>Bookings</h1>';
+
+    // Filter form
+    echo '<form method="post" style="margin-bottom:20px;">';
+    echo '<label>From Date: <input type="date" name="from_date" value="' . esc_attr($from_date) . '"></label> ';
+    echo '<label>To Date: <input type="date" name="to_date" value="' . esc_attr($to_date) . '"></label> ';
+    echo '<label>Service: <select name="service_id">';
+    echo '<option value="0">All Services</option>';
+    foreach ($services as $service) {
+        $selected = $service_filter == $service->service_id ? 'selected' : '';
+        echo '<option value="' . intval($service->service_id) . '" ' . $selected . '>' . esc_html($service->service_name) . '</option>';
+    }
+    echo '</select></label> ';
+
+    // Booked By dropdown
+    echo '<label>Booked By: <select name="booked_by">';
+    echo '<option value="0"' . selected($booked_by_filter, 0, false) . '>All</option>';
+    echo '<option value="1"' . selected($booked_by_filter, 1, false) . '>Website</option>';
+    echo '<option value="2"' . selected($booked_by_filter, 2, false) . '>Private</option>';
+    echo '</select></label> ';
+
+    echo '<input type="submit" class="button button-primary" value="Filter">';
+    echo '</form>';
+
+    // Table
+    if ($results) {
+        echo '<table class="widefat fixed striped">';
+        echo '<thead><tr>';
+        echo '<th>Date</th>';
+        echo '<th>Service</th>';
+        echo '<th>Booked By Website</th>';
+        echo '<th>Customer Name</th>';
+        echo '<th>Customer Email/Phone number</th>';
+        echo '<th>Reference</th>';
+        echo '</tr></thead><tbody>';
+
+        foreach ($results as $row) {
+            echo '<tr>';
+            echo '<td>' . esc_html($row->booking_date) . '</td>';
+            echo '<td>' . esc_html($row->service_name) . '</td>';
+            echo '<td>' . ($row->booked_by_main ? 'Yes' : 'No') . '</td>';
+            echo '<td>' . esc_html($row->customer_name) . '</td>';
+            echo '<td>' . esc_html($row->customer_email) . '</td>';
+            echo '<td>' . esc_html($row->session_id) . '</td>';
+            echo '</tr>';
+        }
+
+        echo '</tbody></table>';
+    } else {
+        echo '<p>No bookings found for the selected filters.</p>';
+    }
+
+    echo '</div>';
+}
+
+
 
 //=============
 //API FUNCTIONS
@@ -2659,14 +3006,17 @@ function pcp_manual_paystack_verify($reference) {
 
     $paystack_status = $result['data']['status'];
 
+    error_log($paystack_status);
+
     if ($paystack_status === 'success') {
         return ['success' => true, 'status' => 'success'];
     } elseif (in_array($paystack_status, ['abandoned', 'failed', 'cancelled'])) {
         return ['success' => false, 'status' => $paystack_status];
     } else {
-        // ongoing, pending, processing
+        // ongoing, pending, processing        
         return ['success' => false, 'status' => $paystack_status];
     }
+    
 }
 
 add_filter('cron_schedules', function($schedules) {

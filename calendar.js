@@ -10,31 +10,53 @@ document.addEventListener("DOMContentLoaded", function () {
   const cancelBtn = document.getElementById("cancel-client-info");
   const bookingSummary = document.getElementById("booking_summary");
 
+  const shortWeekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const fullWeekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+  function updateWeekdays() {
+    const headerDivs = document.querySelectorAll(".calendar-header > div");
+    if (window.innerWidth <= 600) {
+      headerDivs.forEach((div, i) => div.textContent = shortWeekdays[i]);
+    } else {
+      headerDivs.forEach((div, i) => div.textContent = fullWeekdays[i]);
+    }
+  }
+
+  // Initial run
+  updateWeekdays();
+
+  // Update on window resize
+  window.addEventListener("resize", updateWeekdays);
+
 
   //Check if cusotmer came form callback
   const queryParams = new URLSearchParams(window.location.search);
   const reference = queryParams.get("reference");
 
-  fetch("/wp-json/pcp/v1/verify_payment", {
-      method: "POST",
-      headers: {
+  if(reference)
+  {
+    fetch(rest_object.rest_url + "verify_payment", {
+        method: "POST",
+        headers: {
         "Content-Type": "application/json",
+        "X-WP-Nonce": rest_object.nonce,
       },
-      body: JSON.stringify({ reference }),
-    })
-      .then((response) => response.json())
-      .then((data) => {
-        if (data.success) {
-          console.log("Payment verified:", data.message);
-          
-        } else {
-          console.error("Verification failed:", data.error || data.message);
-          
-        }
+        body: JSON.stringify({ reference }),
       })
-      .catch((error) => {
-        console.error("Error contacting verification endpoint:", error);
-      });
+        .then((response) => response.json())
+        .then((data) => {
+          if (data.success) {
+            console.log("Payment verified:", data.message);
+            
+          } else {
+            console.error("Verification failed:", data.error || data.message);
+            
+          }
+        })
+        .catch((error) => {
+          console.error("Error contacting verification endpoint:", error);
+        });
+  }
 
 
   let $services_info = [];
@@ -237,7 +259,7 @@ document.addEventListener("DOMContentLoaded", function () {
             const btn = document.createElement("button");
             btn.classList.add("book-btn");
             btn.dataset.spots_info = JSON.stringify(slot.spots);
-            btn.textContent = "Book Now";
+            btn.textContent = "Book";
             btn.style.position = "absolute";
             btn.style.top = "0";
             btn.style.left = "0";
@@ -247,7 +269,7 @@ document.addEventListener("DOMContentLoaded", function () {
             btn.style.color = "white";
             btn.style.border = "none";
             btn.style.borderRadius = "4px";
-            btn.style.fontSize = "11px";
+            btn.style.fontSize = "14px";
             btn.style.display = "flex";
             btn.style.justifyContent = "center";
             btn.style.alignItems = "center";
@@ -353,7 +375,7 @@ document.addEventListener("DOMContentLoaded", function () {
               `;
                     //tableBody.appendChild(row);
 
-                    const colum = document.createElement("td");
+                    //const colum = document.createElement("td");
                     const delete_button = document.createElement("button");
                     delete_button.textContent = "Delete";
 
@@ -507,13 +529,13 @@ document.addEventListener("DOMContentLoaded", function () {
                       checkoutSection.style.display = "none";
                     }
                   } else {
-                    btn.textContent = "Book Now";
+                    btn.textContent = "Book";
                     alert("Error: " + (data.message || "Unknown error"));
                   }
                 })
                 .catch((err) => {
                   console.error("Booking failed:", err);
-                  btn.textContent = "Book Now";
+                  btn.textContent = "Book";
                   alert("Something went wrong. Try again.");
                 })
                 .finally(() => {

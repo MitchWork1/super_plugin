@@ -24,7 +24,7 @@ select {
 
 .calendar-header {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   background-color: #f5f5f5;
   border-bottom: 1px solid #ccc;
   text-align: center;
@@ -43,7 +43,7 @@ select {
 
 .calendar-body {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   background-color: #fff;
   min-height: 300px;
 }
@@ -143,21 +143,22 @@ select {
 }
 
 #booking_summary table.booking-table td:nth-child(1) {
-  width: 35%; /* Date */
+  width: 30%; /* Date */
 }
 
 #booking_summary table.booking-table td:nth-child(2) {
-  width: 35%; /* Time */
+  width: 30%; /* Time */
 }
 
 #booking_summary table.booking-table td:nth-child(3) {
-  width: 30%; /* Cost */
+  width: auto; /* Cost */
   text-align: right;
 }
 
 #booking_summary table.booking-table td:nth-child(4) {
-  width: 10%; /* Delete button */
+  width: auto; /* Delete button */
   text-align: right;
+  min-width: 60px;
 }
 
 #booking_summary h2 {
@@ -277,3 +278,85 @@ select {
     min-width: 140px;
   }
 }
+
+/* --- MOBILE FIXES --- */
+@media (max-width: 900px) {
+  /* Make day cells taller so slots don't squeeze */
+  .day-cell {
+    min-height: auto;
+    padding: 2px;
+    font-size: 12px;
+  }
+
+  /* Stack slots vertically like cards instead of tables */
+  .slots-wrapper {
+    margin-top: 2px;
+    border-width: 1px;
+  }
+
+  .slots-table {
+    display: block;
+    width: 100%;
+    font-size: 13px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    margin-bottom: 6px;
+    overflow: hidden;
+  }
+
+  .slots-table tr {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 6px;
+  }
+
+  .slots-table td {
+    display: block;
+    width: 100%;
+    padding: 2px 3px;
+    text-align: left;
+    border: none !important;
+  }
+
+  .slots-table td.time-cell {
+    padding: 0px 1px;
+    font-weight: bold;
+    background: none;
+    white-space: normal;
+    font-size: 12px;
+  }
+
+  .slots-table td.spots {
+    background: none;
+    padding: 0px 1px;
+    font-size: 12px;
+  }
+
+  /* Make Book button always visible (no hover dependency) */
+  .book-btn {
+  position: relative !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  display: inline-block;          
+  margin-top: 2px;
+  padding: 0px 2px;              
+  font-size: 12px !important;     
+  white-space: normal;            
+  max-width: 100%;                
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+}
+
+
+.calendar-scroll-wrapper {
+    overflow-x: auto;       
+    -webkit-overflow-scrolling: touch; 
+}
+
+#calendar-container {
+    min-width: 500px;      
+}
+
