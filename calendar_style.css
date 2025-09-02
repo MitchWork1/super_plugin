@@ -348,6 +348,11 @@ select {
   box-sizing: border-box;
 }
 
+label,
+select {
+  display: block;
+}
+
 }
 
 
@@ -359,4 +364,17 @@ select {
 #calendar-container {
     min-width: 500px;      
 }
+
+ #timer-display {
+      position: fixed;     /* Stays in the same place on scroll */
+      top: 10%;           /* Distance from top of window */
+      right: 10px;         /* Distance from right of window */
+      background-color: rgba(0,0,0,0.7);
+      color: #fff;
+      padding: 8px 12px;
+      border-radius: 5px;
+      font-size: 18px;
+      z-index: 9999;       /* Makes sure it’s on top of other elements */
+      font-family: monospace;
+  }
 

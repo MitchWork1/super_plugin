@@ -9,9 +9,18 @@ document.addEventListener("DOMContentLoaded", function () {
   const continueBtn = document.getElementById("submit-client-info");
   const cancelBtn = document.getElementById("cancel-client-info");
   const bookingSummary = document.getElementById("booking_summary");
+  let countdownTime = 600;
+  let timerInterval = null;
+  const timerDisplay = document.getElementById("timer-display");
+  const timer_reset_max = 3;
+  let timer_reset_current= 0;
+  let timerStarted = false;
+
 
   const shortWeekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
   const fullWeekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+  serviceSelect.selectedIndex = 0;
 
   function updateWeekdays() {
     const headerDivs = document.querySelectorAll(".calendar-header > div");
@@ -46,8 +55,8 @@ document.addEventListener("DOMContentLoaded", function () {
         .then((response) => response.json())
         .then((data) => {
           if (data.success) {
-            console.log("Payment verified:", data.message);
-            
+            alert("Booking Succesful! An email will be sent to you shortly. If not recieved within 30 minutes contact suppourt.");
+            window.history.replaceState({}, document.title, window.location.pathname);
           } else {
             console.error("Verification failed:", data.error || data.message);
             
@@ -67,11 +76,14 @@ document.addEventListener("DOMContentLoaded", function () {
   continueBtn.addEventListener("click", function () {
     const name = document.getElementById("client-name").value.trim();
     const email = document.getElementById("client-email").value.trim();
+    const number = document.getElementById("client-number").value.trim();
 
-    if (!name || !email) {
-      alert("Please fill in both name and email.");
+    if (!name || !email || !number) {
+      alert("Please fill in all fields.");
       return;
     }
+
+    alert("You will be redirected shortly.");
 
     fetch(rest_object.rest_url + "init_payment", {
       method: "POST",
@@ -83,6 +95,7 @@ document.addEventListener("DOMContentLoaded", function () {
         session_id: sessionId,
         customer_email: email,
         customer_name: name,
+        customer_number: number,
       }),
     })
       .then((res) => res.json())
@@ -91,8 +104,11 @@ document.addEventListener("DOMContentLoaded", function () {
           // Redirect the user to Paystack payment page
           redirect_from_checkout = true;
           window.location.href = data.data.redirect_url;
-        } else {
+        } else if (data.response && data.response.code === "invalid_email_address"){
+          alert("Invalid email address");
+        }else {
           console.error("Payment init failed:", data.message || data);
+          alert("There was an error. Please try again.");
         }
       })
       .catch((err) => console.error("REST error:", err));
@@ -115,16 +131,26 @@ document.addEventListener("DOMContentLoaded", function () {
   currentMonth = today.getMonth();
   currentDate = today.getDate();
 
-  window.addEventListener("beforeunload", function () {
-    if (!redirect_from_checkout && sessionId) {
-      const url = `${
-        rest_object.rest_url
-      }release_all_spots?session_id=${encodeURIComponent(sessionId)}&_wpnonce=${
-        rest_object.nonce
-      }`;
+function releaseSpots() {
+  if (!redirect_from_checkout && sessionId) {
+    const url = `${rest_object.rest_url}release_all_spots?session_id=${encodeURIComponent(sessionId)}&_wpnonce=${rest_object.nonce}`;
+
+    if (navigator.sendBeacon) {
       navigator.sendBeacon(url);
+    } else {
+      fetch(url, { method: "POST", keepalive: true });
     }
-  });
+  }
+}
+
+document.addEventListener("visibilitychange", function () {
+  if (document.visibilityState === "hidden") {
+    releaseSpots();
+  }
+});
+
+window.addEventListener("pagehide", releaseSpots);
+
 
   prevBtn.addEventListener("click", () => {
     if (currentMonth === 0) {
@@ -280,20 +306,62 @@ document.addEventListener("DOMContentLoaded", function () {
             btn.style.cursor = "pointer";
             
 
+
             btn.addEventListener("click", (e) => {
+              e.stopPropagation();
+              triggerBooking(slot, btn, startTime, endTimeStr, dateKey)
+            });
+
+            tr.appendChild(btn);
+
+             tr.addEventListener("click", () => {
+                triggerBooking(slot, btn, startTime, endTimeStr, dateKey);
+              });
+
+            tr.addEventListener("mouseenter", () => {
+              if (!btn.disabled) {
+                btn.style.opacity = "1";
+                btn.style.pointerEvents = "auto";
+              }
+            });
+            tr.addEventListener("mouseleave", () => {
+              if (!btn.disabled) {
+                btn.style.opacity = "0";
+                btn.style.pointerEvents = "none";
+              }
+            });
+          }
+          table.appendChild(tr);
+          div_wrapper.appendChild(table);
+          dayCell.appendChild(div_wrapper);
+        });
+      }
+      calendarBody.appendChild(dayCell);
+    }
+  }
+
+  function triggerBooking(slot, btn, startTime, endTimeStr, dateKey)
+  {
               bookingSummary.style.display = "block";
               btn.disabled = true;
               btn.textContent = "Booking...";
 
-              const spotsInfoStr = e.target.dataset.spots_info;
-              const all_spots_info = JSON.parse(spotsInfoStr);
+              const all_spots_info = JSON.parse(btn.dataset.spots_info);
+              /*
               let selectedAvailabilityId = null;
               for (const spot of all_spots_info) {
                 if (spot.status === "a") {
                   selectedAvailabilityId = spot.availability_id;
                   break;
                 }
-              }             
+              }            */ 
+
+              let spotsAvailableList = [];
+              for (const spot of all_spots_info) {
+                if (spot.status === "a") {
+                  spotsAvailableList.push(spot.availability_id);
+                }
+              }   
               
 
               const serviceId = serviceSelect.value;
@@ -318,15 +386,19 @@ document.addEventListener("DOMContentLoaded", function () {
                   "X-WP-Nonce": rest_object.nonce,
                 },
                 body: JSON.stringify({
-                  availability_id: selectedAvailabilityId,
+                  availability_id_list: spotsAvailableList,
                   session_id: sessionId,
                 }),
               })
                 .then((res) => res.json())
                 .then((data) => {
                   if (data.success) {
+                    selectedAvailabilityId = data.availability_id;
                     btn.textContent = "Booked!";
-                    btn.classList.add("booked-wave");
+                    btn.classList.add("booked-wave");                   
+
+                    startTimer(false);
+
                     let providerSection = document.querySelector(
                       `.provider-section[data-provider-id="${providerId}"]`
                     );
@@ -569,30 +641,6 @@ const totalCost = Array.from(allCostTds)
 
   updateCalendar();
 });
-            });
-
-            tr.appendChild(btn);
-
-            tr.addEventListener("mouseenter", () => {
-              if (!btn.disabled) {
-                btn.style.opacity = "1";
-                btn.style.pointerEvents = "auto";
-              }
-            });
-            tr.addEventListener("mouseleave", () => {
-              if (!btn.disabled) {
-                btn.style.opacity = "0";
-                btn.style.pointerEvents = "none";
-              }
-            });
-          }
-          table.appendChild(tr);
-          div_wrapper.appendChild(table);
-          dayCell.appendChild(div_wrapper);
-        });
-      }
-      calendarBody.appendChild(dayCell);
-    }
   }
 
   updateCalendar();
@@ -674,6 +722,75 @@ const totalCost = Array.from(allCostTds)
         console.error("Error fetching availability:", err);
       });
   });
+
+function startTimer(reset = false) {
+
+    if (timerStarted && !reset) return;
+
+    if (reset) {
+        countdownTime = 600;
+    }
+
+    timerStarted = true;
+    clearInterval(timerInterval);
+
+    timerInterval = setInterval(() => {
+        countdownTime--;
+        timerDisplay.textContent = formatTime(countdownTime);
+
+        
+        if (countdownTime <= 300) { 
+            clearInterval(timerInterval);
+            askUserStillBusy();
+        }
+    }, 1000);
+}
+
+function askUserStillBusy() {
+    const stillBusy = confirm("Are you still completing your booking? Click OK to continue.");
+
+    if (stillBusy) {
+        if (timer_reset_current < timer_reset_max) {
+            extendBookingHold(sessionId)
+            timer_reset_current++;
+            startTimer(true);
+        } else {
+            alert("Maximum waiting time reached. Please complete your booking soon.");
+            window.location.reload();
+        }
+    } else {
+        window.location.reload();
+    }
+}
+
+function formatTime(seconds) {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+}
+
+function extendBookingHold(availabilityId, extraMinutes = 5) {
+    fetch(`${rest_object.rest_url}extend_hold`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-WP-Nonce': rest_object.nonce,
+        },
+        body: JSON.stringify({
+            sessionId: sessionId,
+        })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.success) {
+            console.log("Hold extended until:", data.new_hold_until);
+        } else {
+            console.error("Failed to extend hold:", data.message);
+        }
+    })
+    .catch(err => console.error("REST error:", err));
+}
+
 
   function formatDate(hybridDate) {
     const [yy, mm, dd] = hybridDate.split("-").map(Number);

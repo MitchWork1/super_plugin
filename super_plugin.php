@@ -26,7 +26,7 @@ add_action('wp_enqueue_scripts', 'enqueue_custom_calendar_assets');
 function enqueue_custom_calendar_assets() {
     if (!apply_filters('pcp_should_enqueue_assets', false)) return;
 
-    wp_enqueue_style('pcp-style', plugin_dir_url(__FILE__) . 'calendar_style.css');
+    wp_enqueue_style('pcp-style', plugin_dir_url(__FILE__) . 'calendar_style.css', [], filemtime(plugin_dir_path(__FILE__) . 'calendar_style.css'));
 
     wp_enqueue_script('pcp-calendar', plugin_dir_url(__FILE__) . 'calendar.js', ['jquery'], filemtime(plugin_dir_path(__FILE__) . 'calendar.js'), true);
 
@@ -49,6 +49,7 @@ function pcp_custom_calendar_shortcode() {
     ob_start(); ?>
     <div class="calendar-scroll-wrapper">
     <div id="calendar-container">
+        <div id="timer-display">10:00</div>
         <label for="provider-select">Select Provider:</label>
         <select id="provider-select">
             <option value="">-- Select Provider --</option>
@@ -104,6 +105,8 @@ function pcp_custom_calendar_shortcode() {
             <h3 style="margin-top:0;">Enter Details to continue</h3>
             <label for="client-name">Name:</label><br>
             <input type="text" id="client-name" style="width:100%; padding:8px; margin-bottom:10px;"><br>
+            <label for="client-name">Phone Number:</label><br>
+            <input type="text" id="client-number" style="width:100%; padding:8px;"><br><br>
             <label for="client-name">Email:</label><br>
             <input type="email" id="client-email" style="width:100%; padding:8px;"><br><br>
             <button id="submit-client-info" style="padding:8px 12px;">Continue</button>
@@ -159,12 +162,14 @@ function pcp_rest_get_availability(WP_REST_Request $request) {
 
     $availability_table = $wpdb->prefix . 'availability';
 
+    /*
     // Clear expired holds
     $wpdb->query("
         UPDATE $availability_table
         SET status = 'a', hold_until = NULL, session_id = NULL
         WHERE status = 'p' AND hold_until < NOW()
     ");
+    */
 
     $service_id = intval($request->get_param('service_id'));
     if (!$service_id) {
@@ -299,7 +304,9 @@ function provider_admin_custom_calendar() {
                 <h3 style="margin-top:0;">Enter Details to continue</h3>
                 <label>Name:</label><br>
                 <input type="text" id="client-name" style="width:100%; padding:8px; margin-bottom:10px;"><br>
-                <label>Email/Phone number:</label><br>
+                <label>Phone Number:</label><br>
+                <input type="text" id="client-number" style="width:100%; padding:8px;"><br><br>
+                <label>Email:</label><br>
                 <input type="email" id="client-email" style="width:100%; padding:8px;"><br><br>
                 <button id="submit-client-info" style="padding:8px 12px;">Continue</button>
                 <button id="cancel-client-info" style="padding:8px 12px; background:#ccc; margin-left:10px;">Cancel</button>
@@ -351,10 +358,11 @@ function provider_admin_custom_calendar() {
         continueBtn.addEventListener("click", function () {
             const name = document.getElementById("client-name").value.trim();
             const email = document.getElementById("client-email").value.trim();
+            const number = document.getElementById("client-number").value.trim();
 
-            if (!name || !email) {
-            alert("Please fill in both name and email.");
-            return;
+            if (!name || !email || !number) {
+                alert("Please fill in all fields (If missing type anything).");
+                return;
             }
 
 
@@ -368,6 +376,7 @@ function provider_admin_custom_calendar() {
                                         availability_id: currentSelectedId,
                                         customer_name: name,
                                         customer_email: email,
+                                        customer_number: number,
                                     }),
                                 })
                                 .then(res => res.json())
@@ -588,197 +597,374 @@ function provider_admin_custom_calendar() {
     </script>
 
     <style>
-        #calendar-container {
-            max-width: 1050px;
-            margin: 20px auto;
-            font-family: Arial, sans-serif;
-        }
+#calendar-container {
+  max-width: 1050px;
+  margin: 20px auto;
+  font-family: Arial, sans-serif;
+}
 
-        label {
-            display: inline-block;
-            margin: 0 10px 10px 0;
-            font-weight: bold;
-        }
+label {
+  display: inline-block;
+  margin: 0 10px 10px 0;
+  font-weight: bold;  
+}
 
-        select {
-            margin-right: 20px;
-            padding: 5px;
-            min-width: 180px;
-        }
+select {
+  margin-right: 20px;
+  padding: 5px;
+  min-width: 180px;
+}
 
-        #my-calendar {
-            border: 1px solid #ccc;
-            box-shadow: 0 0 8px rgba(0,0,0,0.1);
-            user-select: none;
-        }
+#my-calendar {
+  border: 1px solid #ccc;
+  box-shadow: 0 0 8px rgba(0,0,0,0.1);
+  user-select: none;
+}
 
-        .calendar-header {
-            display: grid;
-            grid-template-columns: repeat(7, 1fr);
-            background-color: #f5f5f5;
-            border-bottom: 1px solid #ccc;
-            text-align: center;
-            font-weight: bold;
-            font-size: 14px;
-            padding: 10px 0;
-        }
+.calendar-header {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  background-color: #f5f5f5;
+  border-bottom: 1px solid #ccc;
+  text-align: center;
+  font-weight: bold;
+  font-size: 14px;
+  padding: 10px 0;
+}
 
-        .calendar-header > div {
-            border-right: 1px solid #ccc;
-        }
+.calendar-header > div {
+  border-right: 1px solid #ccc;
+}
 
-        .calendar-header > div:last-child {
-            border-right: none;
-        }
+.calendar-header > div:last-child {
+  border-right: none;
+}
 
-        .calendar-body {
-            display: grid;
-            grid-template-columns: repeat(7, 1fr);
-            background-color: #fff;
-            min-height: 300px;
-        }
+.calendar-body {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  background-color: #fff;
+  min-height: 300px;
+}
 
-        .day-cell {
-            border: 1px solid #eee;
-            min-height: 140px;
-            padding: 8px;
-            font-size: 13px;
-            display: flex;
-            flex-direction: column;
-            justify-content: flex-start;
-            position: relative;
-            overflow: hidden;
-            box-sizing: border-box;
-            white-space: nowrap;
-        }
+.day-cell {
+  border: 1px solid #eee;
+  min-height: 140px;
+  padding: 8px;
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  position: relative;
+  overflow: hidden;
+  box-sizing: border-box;
+  white-space: nowrap;
+}
 
-        .day-cell.today {
-            background-color: #fff9e6;
-            border: 1px solid #ffd700;
-        }
+.day-cell.today {
+  background-color: #fff9e6;
+  border: 1px solid #ffd700;
+}
 
-        .day-cell.empty {
-            background: #f9f9f9;
-            border: none;
-        }
+.day-cell.empty {
+  background: #f9f9f9;
+  border: none;
+}
 
-        .day-number {
-            font-weight: bold;
-            margin-bottom: 6px;
-        }
+.day-number {
+  font-weight: bold;
+  margin-bottom: 6px;
+}
 
-        .slots-wrapper {
-            border: 2px solid #07bcf3;
-            border-radius: 8px;
-            margin-top: 2px;
-            position: relative;
-            overflow: hidden;
-        }
+.slots-wrapper {
+  border: 2px solid #07bcf3;
+  border-radius: 8px;
+  margin-top: 2px;
+  overflow: hidden;
+}
 
-        .slots-wrapper:hover .book-btn {
-            opacity: 1 !important;
-            pointer-events: auto !important;
-        }
+.slots-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
 
-        .slots-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 12px;
-        }
+.slots-table td {
+  padding: 4px 6px;
+  border: none;
+  position: relative;
+  cursor: pointer;
+}
 
-        .slots-table td {
-            padding: 4px 6px;
-            border: none;
-            position: relative;
-            cursor: pointer;
-        }
+.slots-table td.time-cell {
+  padding: 4px 6px;
+  border: none;
+  position: relative;
+  cursor: pointer;
+  background-color: #90d3ff;
+}
 
-        .slots-table td.time-cell {
-            padding: 4px 6px;
-            border: none;
-            position: relative;
-            cursor: pointer;
-            background-color: #90d3ff;
-        }
+.slots-table td.spots {
+  padding: 4px 6px;
+  border: 1px;
+  position: relative;
+  cursor: pointer;
+  background-color: #67c2ff;
+}
 
-        .slots-table td.spots {
-            padding: 4px 6px;
-            border: 1px;
-            position: relative;
-            cursor: pointer;
-            background-color: #67c2ff;
-        }
+.book-btn {
+  border: none;
+  border-radius: 4px;
+  font-size: 11px;
+  user-select: none;
+  cursor: pointer;
+}
 
-        /* --- MOBILE FIXES --- */
-        @media (max-width: 900px) {
-        /* Make day cells taller so slots don't squeeze */
-        .day-cell {
-            min-height: auto;
-            padding: 2px;
-            font-size: 12px;
-        }
+.service-heading {
+  font-size: 23px;
+  margin-top: 10px;
+  margin-bottom: 7px;
+  text-decoration: underline;
+}
 
-        /* Stack slots vertically like cards instead of tables */
-        .slots-wrapper {
-            margin-top: 2px;
-            border-width: 1px;
-        }
+#booking_summary table.booking-table {
+  table-layout: fixed;
+  width: 100%;
+  border-collapse: collapse;
+}
 
-        .slots-table {
-            display: block;
-            width: 100%;
-            font-size: 13px;
-            border: 1px solid #ddd;
-            border-radius: 6px;
-            margin-bottom: 6px;
-            overflow: hidden;
-        }
+#booking_summary table.booking-table td {
+  /*padding: 6px 12px;*/
+  font-size: 1rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
-        .slots-table tr {
-            display: flex;
-            flex-direction: column;
-            align-items: flex-start;
-            padding: 6px;
-        }
+#booking_summary table.booking-table td:nth-child(1) {
+  width: 30%; /* Date */
+}
 
-        .slots-table td {
-            display: block;
-            width: 100%;
-            padding: 2px 3px;
-            text-align: left;
-            border: none !important;
-        }
+#booking_summary table.booking-table td:nth-child(2) {
+  width: 30%; /* Time */
+}
 
-        .slots-table td.time-cell {
-            padding: 0px 1px;
-            font-weight: bold;
-            background: none;
-            white-space: normal;
-            font-size: 12px;
-        }
+#booking_summary table.booking-table td:nth-child(3) {
+  width: auto; /* Cost */
+  text-align: right;
+}
 
-        .slots-table td.spots {
-            background: none;
-            padding: 0px 1px;
-            font-size: 12px;
-        }
+#booking_summary table.booking-table td:nth-child(4) {
+  width: auto; /* Delete button */
+  text-align: right;
+  min-width: 60px;
+}
 
-        /* Make Book button always visible (no hover dependency) */
-        .book-btn {
-        position: relative !important;
-        opacity: 1 !important;
-        pointer-events: auto !important;
-        display: inline-block;          
-        margin-top: 2px;
-        padding: 0px 2px;              
-        font-size: 12px !important;     
-        white-space: normal;            
-        max-width: 100%;                
-        overflow: hidden;
-        box-sizing: border-box;
-        }
+#booking_summary h2 {
+  font-size: 30px;
+  font-weight: bold;
+  border-bottom: 2px solid black;
+  padding-bottom: 5px;              
+  margin-bottom: 12px;
+}
 
-        }
+#booking_summary h3 {
+  font-size: 25px;
+  font-weight: bold;
+  margin-bottom: 10px;
+}
+
+#booking_summary h4 {
+  margin-top: 10px;
+}
+
+
+.booking-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 20px;
+}
+
+.booking-table th, .booking-table td {
+  text-align: left;
+  padding-top: 0.5%;
+}
+
+.booking-total-table {
+  width: 100%;
+  border-top: 2px solid black;
+  border-bottom: 2px solid black;
+  margin-top: 15px;
+  padding-top: 10px;
+  font-weight: bold;
+  font-size: 1.2rem;
+  border-collapse: collapse;
+}
+
+.total-label {
+  text-align: left;
+  padding: 10px 0;
+}
+
+.total-amount {
+  text-align: right;
+  padding: 10px 0;
+}
+
+.booked-wave {
+  animation: wave-text 1s ease-in-out forwards;
+  pointer-events: none; /* disables clicks */
+  cursor: default;
+  color: black !important; /* dark yellow */
+  background-color: yellow !important;
+}
+
+.checkout-btn {
+  padding: 10px 20px;
+  font-size: 16px;
+  background-color: #1e88e5;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+}
+
+.checkout-btn:hover {
+  background-color: #1565c0;
+}
+
+@keyframes wave-text {
+  0%, 100% {
+    text-shadow: none;
+  }
+  50% {
+    text-shadow:
+      0 0 5px #b59f00,
+      0 0 10px #b59f00,
+      0 0 20px #b59f00;
+  }
+}
+
+/* Darker Book Now text */
+.book-btn {
+  color: #0b3d0b; /* dark green, for example */
+  font-weight: 600;
+}
+
+.book-btn:disabled {
+  background-color: #0b3d0b;
+  cursor: not-allowed;
+}
+
+@media (max-width: 768px) {
+  #calendar-container {
+    max-width: 100%;
+    padding: 0 10px;
+  }
+
+  .calendar-header,
+  .calendar-body {
+    grid-template-columns: repeat(7, 1fr);
+  }
+
+  .day-cell {
+    min-height: 110px;
+    font-size: 11px;
+  }
+
+  select {
+    min-width: 140px;
+  }
+}
+
+/* --- MOBILE FIXES --- */
+@media (max-width: 900px) {
+  /* Make day cells taller so slots don't squeeze */
+  .day-cell {
+    min-height: auto;
+    padding: 2px;
+    font-size: 12px;
+  }
+
+  /* Stack slots vertically like cards instead of tables */
+  .slots-wrapper {
+    margin-top: 2px;
+    border-width: 1px;
+  }
+
+  .slots-table {
+    display: block;
+    width: 100%;
+    font-size: 13px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    margin-bottom: 6px;
+    overflow: hidden;
+  }
+
+  .slots-table tr {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 6px;
+  }
+
+  .slots-table td {
+    display: block;
+    width: 100%;
+    padding: 2px 3px;
+    text-align: left;
+    border: none !important;
+  }
+
+  .slots-table td.time-cell {
+    padding: 0px 1px;
+    font-weight: bold;
+    background: none;
+    white-space: normal;
+    font-size: 12px;
+  }
+
+  .slots-table td.spots {
+    background: none;
+    padding: 0px 1px;
+    font-size: 12px;
+  }
+
+  /* Make Book button always visible (no hover dependency) */
+  .book-btn {
+  position: relative !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  display: inline-block;          
+  margin-top: 2px;
+  padding: 0px 2px;              
+  font-size: 12px !important;     
+  white-space: normal;            
+  max-width: 100%;                
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+label,
+select {
+  display: block;
+}
+
+}
+
+
+.calendar-scroll-wrapper {
+    overflow-x: auto;       
+    -webkit-overflow-scrolling: touch; 
+}
+
+#calendar-container {
+    min-width: 500px;      
+}
+
+
     </style>
 
     <?php
@@ -839,6 +1025,7 @@ function admin_book_spot_available_rest(WP_REST_Request $request) {
     $availability_id = intval($request->get_param('availability_id'));
     $customer_name = sanitize_text_field($request->get_param('customer_name'));
     $customer_email = sanitize_text_field($request->get_param('customer_email'));
+    $customer_number = sanitize_text_field($request->get_param('customer_number'));
 
     if (!$availability_id || $availability_id == -1) {
         return new WP_REST_Response([
@@ -856,6 +1043,13 @@ function admin_book_spot_available_rest(WP_REST_Request $request) {
         return new WP_REST_Response([
             'success' => false,
             'message' => 'Missing customer email',
+        ], 400);
+    }
+
+    if (!$customer_number) {
+        return new WP_REST_Response([
+            'success' => false,
+            'message' => 'Missing customer number',
         ], 400);
     }
 
@@ -893,6 +1087,7 @@ function admin_book_spot_available_rest(WP_REST_Request $request) {
                 'booked_by_main'  => 0,
                 'customer_name'   => $customer_name,
                 'customer_email'  => $customer_email,
+                'customer_number' => $customer_number,
                 'created_at'      => current_time('mysql')
             ]
         );
@@ -955,31 +1150,44 @@ add_action('rest_api_init', function () {
 function pcp_book_spot_in_avail_rest($request) {
     global $wpdb;
 
-    $availability_id = intval($request['availability_id']);
+    $availability_id_list = $request['availability_id_list'];
     $session_id = sanitize_text_field($request['session_id'] ?? '');
 
-    if (!$session_id || !$availability_id) {
-        return new WP_REST_Response(['success' => false, 'message' => 'Missing session or spot ID'], 400);
+    if (!$session_id || !is_array($availability_id_list) || empty($availability_id_list)) {
+        return new WP_REST_Response(['success' => false, 'message' => 'Missing session or spot IDs'], 400);
     }
 
     $availability_table = $wpdb->prefix . 'availability';
+    $selected_availability_id = null;
 
-    $updated = $wpdb->query(
-        $wpdb->prepare("
-            UPDATE $availability_table
-            SET status = 'p',
-                hold_until = DATE_ADD(NOW(), INTERVAL 15 MINUTE),
-                session_id = %s
-            WHERE availability_id = %d AND status = 'a'
-        ", $session_id, $availability_id)
-    );
+    foreach ($availability_id_list as $availability_id) {
+        $updated = $wpdb->query(
+            $wpdb->prepare("
+                UPDATE $availability_table
+                SET status = 'p',
+                    hold_until = DATE_ADD(NOW(), INTERVAL 15 MINUTE),
+                    session_id = %s
+                WHERE availability_id = %d AND status = 'a'
+            ", $session_id, $availability_id)
+        );
 
-    if ($updated === false) {
-        return new WP_REST_Response(['success' => false, 'message' => 'Database error'], 500);
+        if ($updated) {
+            $selected_availability_id = $availability_id;
+            break;
+        }
     }
 
-    if ($updated === 0) {
-        return new WP_REST_Response(['success' => false, 'message' => 'Spot not available or already booked'], 409);
+    if ($selected_availability_id) {
+        return new WP_REST_Response([
+            'success' => true,
+            'message' => 'Spot reserved',
+            'availability_id' => $selected_availability_id
+        ], 200);
+    } else {
+        return new WP_REST_Response([
+            'success' => false,
+            'message' => 'Sorry, spot is already reserved by someone else!'
+        ], 409);
     }
 
     update_providers_availability_spots($session_id);
@@ -1128,6 +1336,39 @@ function pcp_verify_payment($request){
     }
 }
 
+add_action('rest_api_init', function () {
+    register_rest_route('pcp/v1', '/extend_hold', [
+        'methods'  => 'POST',
+        'callback' => 'pcp_extend_hold',
+        'permission_callback' => function ($request) {
+            $nonce = $request->get_header('X-WP-Nonce');
+            return wp_verify_nonce($nonce, 'wp_rest');
+        },
+    ]);
+});
+
+function pcp_extend_hold($request) {
+    global $wpdb;
+
+   $session_id = sanitize_text_field($request->get_param('sessionId'));
+
+    $availability_table = $wpdb->prefix . 'availability';
+
+    $updated = $wpdb->query(
+        $wpdb->prepare("
+            UPDATE $availability_table
+            SET hold_until = DATE_ADD(NOW(), INTERVAL 10 MINUTE)
+            WHERE session_id = %d AND status = 'p'
+        ", $session_id)
+    );
+
+    if ($updated === false) {
+        return new WP_REST_Response(['success' => false, 'message' => 'Database error'], 500);
+    }
+
+    return new WP_REST_Response(['success' => true, 'message' => 'Hold unitl updated'], 200);
+}
+
 
 
 
@@ -1150,6 +1391,7 @@ function pcp_rest_init_payment($request) {
     $session_id = sanitize_text_field($params['session_id'] ?? '');
     $customer_name = sanitize_text_field($params['customer_name'] ?? '');
     $customer_email = sanitize_text_field($params['customer_email'] ?? '');
+    $customer_number = sanitize_text_field($params['customer_number'] ?? '');
 
     if (empty($session_id)) {
         return new WP_REST_Response(['error' => 'Missing session ID'], 400);
@@ -1199,24 +1441,6 @@ function pcp_rest_init_payment($request) {
         $cost_provider = floatval($row['service_cost_provider']);
         $cost_main = floatval($row['service_cost_main']);
         $availability_id = intval($row['availability_id']);
-
-        $already_booked = $wpdb->get_var($wpdb->prepare(
-            "SELECT COUNT(*) FROM {$wpdb->prefix}bookings WHERE availability_id = %d",
-            $availability_id
-        ));
-
-        if (!$already_booked) {
-            $wpdb->insert(
-                "{$wpdb->prefix}bookings",
-                [
-                    'availability_id' => $availability_id,
-                    'customer_name'   => $customer_name,
-                    'customer_email'  => $customer_email,
-                    'booked_by_main'  => 1
-                ],
-                ['%d', '%s', '%s', '%d']
-            );
-        }
 
         if (!isset($provider_data[$paystack_subaccount])) {
             $provider_data[$paystack_subaccount] = [
@@ -1272,9 +1496,32 @@ function pcp_rest_init_payment($request) {
     //Set hold unitl to null as uesr can take as long as they like to do payment, webhook or cron will verify
     $wpdb->query($wpdb->prepare("
         UPDATE {$wpdb->prefix}availability
-        SET hold_until = NULL
+        SET hold_until = DATE_ADD(NOW(), INTERVAL 5 MINUTE)
         WHERE session_id = %s
     ", $session_id));
+
+
+    foreach($results as $row) {
+        $already_booked = $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM {$wpdb->prefix}bookings WHERE availability_id = %d",
+            $availability_id
+        ));
+
+        if (!$already_booked) {
+            $wpdb->insert(
+                "{$wpdb->prefix}bookings",
+                [
+                    'availability_id' => $availability_id,
+                    'customer_name'   => $customer_name,
+                    'customer_email'  => $customer_email,
+                    'customer_number' => $customer_number,
+                    'booked_by_main'  => 1
+                ],
+                ['%d', '%s', '%s', '%s', '%d']
+            );
+        }
+
+    }
 
     return new WP_REST_Response([
         'success' => true,
@@ -1567,6 +1814,7 @@ function create_tables() {
         booked_by_main  BOOLEAN NOT NULL,
         customer_name VARCHAR(100),
         customer_email VARCHAR(100),
+        customer_number VARCHAR(100),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (booking_id),
         FOREIGN KEY (availability_id) REFERENCES $availability_table(availability_id) ON DELETE CASCADE
@@ -2678,6 +2926,7 @@ function create_and_send_email($to, $session_id){
         return;
     }
 
+
     $message = generate_html_email_from_availability($results, $session_id);
 
     $subject = 'Tickets!';
@@ -2918,14 +3167,18 @@ function pcp_release_expired_pending() {
                             hold_until = NULL
                         WHERE availability_id = %d
                         AND status = 'p'
-                        AND hold_until < NOW()
                     ", $availability_id));
 
                     $wpdb->delete($bookings_table, [
                         'availability_id' => $availability_id
                     ], ['%d']);
 
+
                     $touched_sessions[] = $session_id;
+                }
+                else
+                {
+                    continue;
                 }
                 continue;
             } else {
@@ -2935,7 +3188,6 @@ function pcp_release_expired_pending() {
                     SET status = 'b'
                     WHERE availability_id = %d
                     AND status = 'p'
-                    AND hold_until < NOW()
                 ", $availability_id));
 
                 $touched_sessions[] = $session_id;
@@ -2952,7 +3204,6 @@ function pcp_release_expired_pending() {
                 hold_until = NULL
             WHERE availability_id = %d
             AND status = 'p'
-            AND hold_until < NOW()
         ", $availability_id));
 
         if (!empty($session_id)) {
