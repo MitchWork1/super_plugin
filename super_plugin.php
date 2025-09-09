@@ -50,6 +50,7 @@ function pcp_custom_calendar_shortcode() {
     <div class="calendar-scroll-wrapper">
     <div id="calendar-container">
         <div id="timer-display">10:00</div>
+        <div class="selection-rows">
         <label for="provider-select">Select Provider:</label>
         <select id="provider-select">
             <option value="">-- Select Provider --</option>
@@ -59,11 +60,13 @@ function pcp_custom_calendar_shortcode() {
                 </option>
             <?php endforeach; ?>
         </select>
-
-        <label for="service-select">Select Service:</label>
+            </div>
+        <div class="selection-rows">
+        <label for="service-select">Select Service:  </label>
         <select id="service-select" disabled>
             <option value="">-- Select Provider First --</option>
         </select>
+            </div>
 
          <div id="calendar-controls" style="display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin: 10px 0;">
             <button id="prev-month" disabled>&laquo; Previous</button>
@@ -111,6 +114,8 @@ function pcp_custom_calendar_shortcode() {
             <input type="email" id="client-email" style="width:100%; padding:8px;"><br><br>
             <button id="submit-client-info" style="padding:8px 12px;">Continue</button>
             <button id="cancel-client-info" style="padding:8px 12px; background:#ccc; margin-left:10px;">Cancel</button>
+
+            <p id="redirect-message" style="margin-top:15px; font-weight:bold; color:green; display:none;">You will be redirected shortly.</p>
         </div>
     </div>
     </div>
@@ -469,97 +474,12 @@ function provider_admin_custom_calendar() {
             prevBtn.disabled = currentYear === today.getFullYear() && currentMonth === today.getMonth();
         }
 
-        function generateCalendar(year, month, slotsData = {}) {
-            const calendarBody = document.getElementById('calendar-body');
-            calendarBody.innerHTML = '';
+        function triggerBooking(slot, btn, startTime, endTimeStr, dateKey){
+            currentSelectedId = -1;
+            btn.disabled = true;
+            const all_spots_info = JSON.parse(btn.dataset.spots_info);
 
-            let firstDay = new Date(year, month, 1).getDay();
-            firstDay = firstDay === 0 ? 6 : firstDay - 1;
-
-            const daysInMonth = new Date(year, month + 1, 0).getDate();
-
-            for (let i = 0; i < firstDay; i++) {
-                const empty = document.createElement('div');
-                empty.className = 'day-cell empty';
-                calendarBody.appendChild(empty);
-            }
-
-            for (let day = 1; day <= daysInMonth; day++) {
-                const dateKey = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-                const slotsForDay = slotsData[dateKey] || [];
-
-                const cell = document.createElement('div');
-                cell.className = 'day-cell';
-                if (year === today.getFullYear() && month === today.getMonth() && day === today.getDate()) {
-                    cell.classList.add('today');
-                }
-
-                const number = document.createElement('div');
-                number.className = 'day-number';
-                number.textContent = day;
-                cell.appendChild(number);
-
-                slotsForDay.forEach(slot => {
-                    const wrapper = document.createElement('div');
-                    wrapper.className = "slots-wrapper";
-
-                    const table = document.createElement('table');
-                    table.className = 'slots-table';
-
-                    const tr = document.createElement('tr');
-                    tr.style.position = 'relative';
-
-                    const startTime = slot.time;
-                    const start = new Date(`${dateKey}T${startTime}`);
-                    const end = new Date(start.getTime() + slot.length_min * 60000);
-                    const endTimeStr = end.toTimeString().slice(0, 5);
-
-                    const timeTd = document.createElement('td');
-                    timeTd.textContent = `${startTime} - ${endTimeStr}`;
-                    timeTd.className = 'hover-target time-cell';
-                    tr.appendChild(timeTd);
-
-                    const spotsTd = document.createElement("td");
-                    spotsTd.classList.add("spots", "hover-target");
-                    const spotsAvailable = slot.spots_total - slot.spots_booked;
-                    spotsTd.textContent = `${spotsAvailable} / ${slot.spots_total}`;
-                    tr.appendChild(spotsTd);
-
-                    if (spotsAvailable > 0) {
-                        const btn = document.createElement("button");
-                        btn.classList.add("book-btn");
-                        btn.dataset.spots_info = JSON.stringify(slot.spots);
-                        btn.textContent = "Book";
-
-                        // Styling for button (same as your styles)
-                        Object.assign(btn.style, {
-                            position: "absolute",
-                            top: "0",
-                            left: "0",
-                            width: "100%",
-                            height: "100%",
-                            backgroundColor: "#4caf50",
-                            color: "white",
-                            border: "none",
-                            borderRadius: "4px",
-                            fontSize: "14px",
-                            display: "flex",
-                            justifyContent: "center",
-                            alignItems: "center",
-                            opacity: "0",
-                            pointerEvents: "none",
-                            transition: "opacity 0.2s ease-in-out",
-                            zIndex: "10",
-                            cursor: "pointer"
-                        });
-
-                        btn.addEventListener("click", (e) => {
-                            currentSelectedId = -1;
-                            const spotsInfoStr = e.target.dataset.spots_info;
-                            const all_spots_info = JSON.parse(spotsInfoStr);
-                            let selectedAvailabilityId = null;
-
-                            for (const spot of all_spots_info) {
+            for (const spot of all_spots_info) {
                                 if (spot.status === "a") {
                                     selectedAvailabilityId = spot.availability_id;
                                     break;
@@ -576,19 +496,138 @@ function provider_admin_custom_calendar() {
                                 currentSelectedId = selectedAvailabilityId;
 
                                 clientModal.style.display = "flex";
+                                btn.disabled = false;
+                                
                             }
-                        });
-
-                        tr.appendChild(btn);
-                    }
-                    table.appendChild(tr);
-                    wrapper.appendChild(table);
-                    cell.appendChild(wrapper);
-                });
-
-                calendarBody.appendChild(cell);
-            }
+            
         }
+
+    function generateCalendar(year, month, slotsData = {}) {
+    const calendarBody = document.getElementById("calendar-body");
+    calendarBody.innerHTML = "";
+
+    let firstDay = new Date(year, month, 1).getDay();
+    firstDay = firstDay === 0 ? 6 : firstDay - 1;
+
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+    for (let i = 0; i < firstDay; i++) {
+      const empty = document.createElement("div");
+      empty.classList.add("day-cell", "empty");
+      calendarBody.appendChild(empty);
+    }
+
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dayCell = document.createElement("div");
+      dayCell.classList.add("day-cell");
+
+      const isToday =
+        year === today.getFullYear() &&
+        month === today.getMonth() &&
+        day === today.getDate();
+      if (isToday) {
+        dayCell.classList.add("today");
+      }
+
+      const dayNumber = document.createElement("div");
+      dayNumber.classList.add("day-number");
+      dayNumber.textContent = day;
+      dayCell.appendChild(dayNumber);
+
+      const dateKey = `${year}-${String(month + 1).padStart(2, "0")}-${String(
+        day
+      ).padStart(2, "0")}`;
+      const slotsForDay = slotsData[dateKey] || [];
+
+      if (slotsForDay.length > 0) {
+        slotsForDay.forEach((slot) => {
+          const div_wrapper = document.createElement("div");
+          div_wrapper.className = "slots-wrapper";
+
+          const table = document.createElement("table");
+          table.classList.add("slots-table");
+
+          const tr = document.createElement("tr");
+          tr.style.position = "relative";
+
+          const startTime = slot.time;
+          const startDate = new Date(`${dateKey}T${startTime}`);
+          const endDate = new Date(
+            startDate.getTime() + slot.length_min * 60000
+          );
+          const endTimeStr = endDate.toTimeString().slice(0, 5);
+
+          // Time cell
+          const timeTd = document.createElement("td");
+          timeTd.textContent = `${startTime} - ${endTimeStr}`;
+          timeTd.classList.add("hover-target", "time-cell");
+          tr.appendChild(timeTd);
+
+          // Spots cell
+          const spotsTd = document.createElement("td");
+          spotsTd.classList.add("spots", "hover-target");
+          const spotsAvailable = slot.spots_total - slot.spots_booked;
+          spotsTd.textContent = `${spotsAvailable} / ${slot.spots_total}`;
+          tr.appendChild(spotsTd);
+
+          if (spotsAvailable > 0) {
+            const btn = document.createElement("button");
+            btn.classList.add("book-btn");
+            btn.dataset.spots_info = JSON.stringify(slot.spots);
+            btn.textContent = "Book";
+            btn.style.position = "absolute";
+            btn.style.top = "0";
+            btn.style.left = "0";
+            btn.style.width = "100%";
+            btn.style.height = "100%";
+            btn.style.backgroundColor = "#4caf50";
+            btn.style.color = "white";
+            btn.style.border = "none";
+            btn.style.borderRadius = "4px";
+            btn.style.fontSize = "14px";
+            btn.style.display = "flex";
+            btn.style.justifyContent = "center";
+            btn.style.alignItems = "center";
+            btn.style.opacity = "0";
+            btn.style.pointerEvents = "none";
+            btn.style.transition = "opacity 0.2s ease-in-out";
+            btn.style.zIndex = "10";
+            btn.style.cursor = "pointer";
+            
+
+
+            btn.addEventListener("click", (e) => {
+              e.stopPropagation();
+              triggerBooking(slot, btn, startTime, endTimeStr, dateKey)
+            });
+
+            tr.appendChild(btn);
+
+             tr.addEventListener("click", () => {
+                triggerBooking(slot, btn, startTime, endTimeStr, dateKey);
+              });
+
+            tr.addEventListener("mouseenter", () => {
+              if (!btn.disabled) {
+                btn.style.opacity = "1";
+                btn.style.pointerEvents = "auto";
+              }
+            });
+            tr.addEventListener("mouseleave", () => {
+              if (!btn.disabled) {
+                btn.style.opacity = "0";
+                btn.style.pointerEvents = "none";
+              }
+            });
+          }
+          table.appendChild(tr);
+          div_wrapper.appendChild(table);
+          dayCell.appendChild(div_wrapper);
+        });
+      }
+      calendarBody.appendChild(dayCell);
+    }
+  }
 
         serviceSelect.addEventListener('change', updateCalendar);
 
@@ -597,372 +636,372 @@ function provider_admin_custom_calendar() {
     </script>
 
     <style>
-#calendar-container {
-  max-width: 1050px;
-  margin: 20px auto;
-  font-family: Arial, sans-serif;
-}
+    #calendar-container {
+    max-width: 1050px;
+    margin: 20px auto;
+    font-family: Arial, sans-serif;
+    }
 
-label {
-  display: inline-block;
-  margin: 0 10px 10px 0;
-  font-weight: bold;  
-}
+    label {
+    display: inline-block;
+    margin: 0 10px 10px 0;
+    font-weight: bold;  
+    }
 
-select {
-  margin-right: 20px;
-  padding: 5px;
-  min-width: 180px;
-}
+    select {
+    margin-right: 20px;
+    padding: 5px;
+    min-width: 180px;
+    }
 
-#my-calendar {
-  border: 1px solid #ccc;
-  box-shadow: 0 0 8px rgba(0,0,0,0.1);
-  user-select: none;
-}
+    #my-calendar {
+    border: 1px solid #ccc;
+    box-shadow: 0 0 8px rgba(0,0,0,0.1);
+    user-select: none;
+    }
 
-.calendar-header {
-  display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  background-color: #f5f5f5;
-  border-bottom: 1px solid #ccc;
-  text-align: center;
-  font-weight: bold;
-  font-size: 14px;
-  padding: 10px 0;
-}
+    .calendar-header {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    background-color: #f5f5f5;
+    border-bottom: 1px solid #ccc;
+    text-align: center;
+    font-weight: bold;
+    font-size: 14px;
+    padding: 10px 0;
+    }
 
-.calendar-header > div {
-  border-right: 1px solid #ccc;
-}
+    .calendar-header > div {
+    border-right: 1px solid #ccc;
+    }
 
-.calendar-header > div:last-child {
-  border-right: none;
-}
+    .calendar-header > div:last-child {
+    border-right: none;
+    }
 
-.calendar-body {
-  display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
-  background-color: #fff;
-  min-height: 300px;
-}
+    .calendar-body {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    background-color: #fff;
+    min-height: 300px;
+    }
 
-.day-cell {
-  border: 1px solid #eee;
-  min-height: 140px;
-  padding: 8px;
-  font-size: 13px;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-start;
-  position: relative;
-  overflow: hidden;
-  box-sizing: border-box;
-  white-space: nowrap;
-}
-
-.day-cell.today {
-  background-color: #fff9e6;
-  border: 1px solid #ffd700;
-}
-
-.day-cell.empty {
-  background: #f9f9f9;
-  border: none;
-}
-
-.day-number {
-  font-weight: bold;
-  margin-bottom: 6px;
-}
-
-.slots-wrapper {
-  border: 2px solid #07bcf3;
-  border-radius: 8px;
-  margin-top: 2px;
-  overflow: hidden;
-}
-
-.slots-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 12px;
-}
-
-.slots-table td {
-  padding: 4px 6px;
-  border: none;
-  position: relative;
-  cursor: pointer;
-}
-
-.slots-table td.time-cell {
-  padding: 4px 6px;
-  border: none;
-  position: relative;
-  cursor: pointer;
-  background-color: #90d3ff;
-}
-
-.slots-table td.spots {
-  padding: 4px 6px;
-  border: 1px;
-  position: relative;
-  cursor: pointer;
-  background-color: #67c2ff;
-}
-
-.book-btn {
-  border: none;
-  border-radius: 4px;
-  font-size: 11px;
-  user-select: none;
-  cursor: pointer;
-}
-
-.service-heading {
-  font-size: 23px;
-  margin-top: 10px;
-  margin-bottom: 7px;
-  text-decoration: underline;
-}
-
-#booking_summary table.booking-table {
-  table-layout: fixed;
-  width: 100%;
-  border-collapse: collapse;
-}
-
-#booking_summary table.booking-table td {
-  /*padding: 6px 12px;*/
-  font-size: 1rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-#booking_summary table.booking-table td:nth-child(1) {
-  width: 30%; /* Date */
-}
-
-#booking_summary table.booking-table td:nth-child(2) {
-  width: 30%; /* Time */
-}
-
-#booking_summary table.booking-table td:nth-child(3) {
-  width: auto; /* Cost */
-  text-align: right;
-}
-
-#booking_summary table.booking-table td:nth-child(4) {
-  width: auto; /* Delete button */
-  text-align: right;
-  min-width: 60px;
-}
-
-#booking_summary h2 {
-  font-size: 30px;
-  font-weight: bold;
-  border-bottom: 2px solid black;
-  padding-bottom: 5px;              
-  margin-bottom: 12px;
-}
-
-#booking_summary h3 {
-  font-size: 25px;
-  font-weight: bold;
-  margin-bottom: 10px;
-}
-
-#booking_summary h4 {
-  margin-top: 10px;
-}
-
-
-.booking-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-bottom: 20px;
-}
-
-.booking-table th, .booking-table td {
-  text-align: left;
-  padding-top: 0.5%;
-}
-
-.booking-total-table {
-  width: 100%;
-  border-top: 2px solid black;
-  border-bottom: 2px solid black;
-  margin-top: 15px;
-  padding-top: 10px;
-  font-weight: bold;
-  font-size: 1.2rem;
-  border-collapse: collapse;
-}
-
-.total-label {
-  text-align: left;
-  padding: 10px 0;
-}
-
-.total-amount {
-  text-align: right;
-  padding: 10px 0;
-}
-
-.booked-wave {
-  animation: wave-text 1s ease-in-out forwards;
-  pointer-events: none; /* disables clicks */
-  cursor: default;
-  color: black !important; /* dark yellow */
-  background-color: yellow !important;
-}
-
-.checkout-btn {
-  padding: 10px 20px;
-  font-size: 16px;
-  background-color: #1e88e5;
-  color: white;
-  border: none;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: background-color 0.3s ease;
-}
-
-.checkout-btn:hover {
-  background-color: #1565c0;
-}
-
-@keyframes wave-text {
-  0%, 100% {
-    text-shadow: none;
-  }
-  50% {
-    text-shadow:
-      0 0 5px #b59f00,
-      0 0 10px #b59f00,
-      0 0 20px #b59f00;
-  }
-}
-
-/* Darker Book Now text */
-.book-btn {
-  color: #0b3d0b; /* dark green, for example */
-  font-weight: 600;
-}
-
-.book-btn:disabled {
-  background-color: #0b3d0b;
-  cursor: not-allowed;
-}
-
-@media (max-width: 768px) {
-  #calendar-container {
-    max-width: 100%;
-    padding: 0 10px;
-  }
-
-  .calendar-header,
-  .calendar-body {
-    grid-template-columns: repeat(7, 1fr);
-  }
-
-  .day-cell {
-    min-height: 110px;
-    font-size: 11px;
-  }
-
-  select {
-    min-width: 140px;
-  }
-}
-
-/* --- MOBILE FIXES --- */
-@media (max-width: 900px) {
-  /* Make day cells taller so slots don't squeeze */
-  .day-cell {
-    min-height: auto;
-    padding: 2px;
-    font-size: 12px;
-  }
-
-  /* Stack slots vertically like cards instead of tables */
-  .slots-wrapper {
-    margin-top: 2px;
-    border-width: 1px;
-  }
-
-  .slots-table {
-    display: block;
-    width: 100%;
+    .day-cell {
+    border: 1px solid #eee;
+    min-height: 140px;
+    padding: 8px;
     font-size: 13px;
-    border: 1px solid #ddd;
-    border-radius: 6px;
-    margin-bottom: 6px;
-    overflow: hidden;
-  }
-
-  .slots-table tr {
     display: flex;
     flex-direction: column;
-    align-items: flex-start;
-    padding: 6px;
-  }
+    justify-content: flex-start;
+    position: relative;
+    overflow: hidden;
+    box-sizing: border-box;
+    white-space: nowrap;
+    }
 
-  .slots-table td {
-    display: block;
-    width: 100%;
-    padding: 2px 3px;
-    text-align: left;
-    border: none !important;
-  }
+    .day-cell.today {
+    background-color: #fff9e6;
+    border: 1px solid #ffd700;
+    }
 
-  .slots-table td.time-cell {
-    padding: 0px 1px;
+    .day-cell.empty {
+    background: #f9f9f9;
+    border: none;
+    }
+
+    .day-number {
     font-weight: bold;
-    background: none;
-    white-space: normal;
+    margin-bottom: 6px;
+    }
+
+    .slots-wrapper {
+    border: 2px solid #07bcf3;
+    border-radius: 8px;
+    margin-top: 2px;
+    overflow: hidden;
+    }
+
+    .slots-table {
+    width: 100%;
+    border-collapse: collapse;
     font-size: 12px;
-  }
+    }
 
-  .slots-table td.spots {
-    background: none;
-    padding: 0px 1px;
-    font-size: 12px;
-  }
+    .slots-table td {
+    padding: 4px 6px;
+    border: none;
+    position: relative;
+    cursor: pointer;
+    }
 
-  /* Make Book button always visible (no hover dependency) */
-  .book-btn {
-  position: relative !important;
-  opacity: 1 !important;
-  pointer-events: auto !important;
-  display: inline-block;          
-  margin-top: 2px;
-  padding: 0px 2px;              
-  font-size: 12px !important;     
-  white-space: normal;            
-  max-width: 100%;                
-  overflow: hidden;
-  box-sizing: border-box;
-}
+    .slots-table td.time-cell {
+    padding: 4px 6px;
+    border: none;
+    position: relative;
+    cursor: pointer;
+    background-color: #90d3ff;
+    }
 
-label,
-select {
-  display: block;
-}
+    .slots-table td.spots {
+    padding: 4px 6px;
+    border: 1px;
+    position: relative;
+    cursor: pointer;
+    background-color: #67c2ff;
+    }
 
-}
+    .book-btn {
+    border: none;
+    border-radius: 4px;
+    font-size: 11px;
+    user-select: none;
+    cursor: pointer;
+    }
+
+    .service-heading {
+    font-size: 23px;
+    margin-top: 10px;
+    margin-bottom: 7px;
+    text-decoration: underline;
+    }
+
+    #booking_summary table.booking-table {
+    table-layout: fixed;
+    width: 100%;
+    border-collapse: collapse;
+    }
+
+    #booking_summary table.booking-table td {
+    /*padding: 6px 12px;*/
+    font-size: 1rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    }
+
+    #booking_summary table.booking-table td:nth-child(1) {
+    width: 30%; /* Date */
+    }
+
+    #booking_summary table.booking-table td:nth-child(2) {
+    width: 30%; /* Time */
+    }
+
+    #booking_summary table.booking-table td:nth-child(3) {
+    width: auto; /* Cost */
+    text-align: right;
+    }
+
+    #booking_summary table.booking-table td:nth-child(4) {
+    width: auto; /* Delete button */
+    text-align: right;
+    min-width: 60px;
+    }
+
+    #booking_summary h2 {
+    font-size: 30px;
+    font-weight: bold;
+    border-bottom: 2px solid black;
+    padding-bottom: 5px;              
+    margin-bottom: 12px;
+    }
+
+    #booking_summary h3 {
+    font-size: 25px;
+    font-weight: bold;
+    margin-bottom: 10px;
+    }
+
+    #booking_summary h4 {
+    margin-top: 10px;
+    }
 
 
-.calendar-scroll-wrapper {
-    overflow-x: auto;       
-    -webkit-overflow-scrolling: touch; 
-}
+    .booking-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 20px;
+    }
 
-#calendar-container {
-    min-width: 500px;      
-}
+    .booking-table th, .booking-table td {
+    text-align: left;
+    padding-top: 0.5%;
+    }
+
+    .booking-total-table {
+    width: 100%;
+    border-top: 2px solid black;
+    border-bottom: 2px solid black;
+    margin-top: 15px;
+    padding-top: 10px;
+    font-weight: bold;
+    font-size: 1.2rem;
+    border-collapse: collapse;
+    }
+
+    .total-label {
+    text-align: left;
+    padding: 10px 0;
+    }
+
+    .total-amount {
+    text-align: right;
+    padding: 10px 0;
+    }
+
+    .booked-wave {
+    animation: wave-text 1s ease-in-out forwards;
+    pointer-events: none; /* disables clicks */
+    cursor: default;
+    color: black !important; /* dark yellow */
+    background-color: yellow !important;
+    }
+
+    .checkout-btn {
+    padding: 10px 20px;
+    font-size: 16px;
+    background-color: #1e88e5;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background-color 0.3s ease;
+    }
+
+    .checkout-btn:hover {
+    background-color: #1565c0;
+    }
+
+    @keyframes wave-text {
+    0%, 100% {
+        text-shadow: none;
+    }
+    50% {
+        text-shadow:
+        0 0 5px #b59f00,
+        0 0 10px #b59f00,
+        0 0 20px #b59f00;
+    }
+    }
+
+    /* Darker Book Now text */
+    .book-btn {
+    color: #0b3d0b; /* dark green, for example */
+    font-weight: 600;
+    }
+
+    .book-btn:disabled {
+    background-color: #0b3d0b;
+    cursor: not-allowed;
+    }
+
+    @media (max-width: 768px) {
+    #calendar-container {
+        max-width: 100%;
+        padding: 0 10px;
+    }
+
+    .calendar-header,
+    .calendar-body {
+        grid-template-columns: repeat(7, 1fr);
+    }
+
+    .day-cell {
+        min-height: 110px;
+        font-size: 11px;
+    }
+
+    select {
+        min-width: 140px;
+    }
+    }
+
+    /* --- MOBILE FIXES --- */
+    @media (max-width: 900px) {
+    /* Make day cells taller so slots don't squeeze */
+    .day-cell {
+        min-height: auto;
+        padding: 2px;
+        font-size: 12px;
+    }
+
+    /* Stack slots vertically like cards instead of tables */
+    .slots-wrapper {
+        margin-top: 2px;
+        border-width: 1px;
+    }
+
+    .slots-table {
+        display: block;
+        width: 100%;
+        font-size: 13px;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        margin-bottom: 6px;
+        overflow: hidden;
+    }
+
+    .slots-table tr {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        padding: 6px;
+    }
+
+    .slots-table td {
+        display: block;
+        width: 100%;
+        padding: 2px 3px;
+        text-align: left;
+        border: none !important;
+    }
+
+    .slots-table td.time-cell {
+        padding: 0px 1px;
+        font-weight: bold;
+        background: none;
+        white-space: normal;
+        font-size: 12px;
+    }
+
+    .slots-table td.spots {
+        background: none;
+        padding: 0px 1px;
+        font-size: 12px;
+    }
+
+    /* Make Book button always visible (no hover dependency) */
+    .book-btn {
+    position: relative !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+    display: inline-block;          
+    margin-top: 2px;
+    padding: 0px 2px;              
+    font-size: 12px !important;     
+    white-space: normal;            
+    max-width: 100%;                
+    overflow: hidden;
+    box-sizing: border-box;
+    }
+
+    label,
+    select {
+    display: block;
+    }
+
+    }
+
+
+    .calendar-scroll-wrapper {
+        overflow-x: auto;       
+        -webkit-overflow-scrolling: touch; 
+    }
+
+    #calendar-container {
+        min-width: 500px;      
+    }
 
 
     </style>
@@ -1328,6 +1367,7 @@ function pcp_verify_payment($request){
     $customer_email = sanitize_email($paystack_data['customer']['email']);
     if ($paystack_data['status'] === 'success') {
         $wpdb->update($table, ['status' => 'b'], ['availability_id' => $row->availability_id]);
+        update_sales_record($reference);
         create_and_send_email($customer_email, $reference);
         return new WP_REST_Response(['success' => true, 'message' => 'Payment verified successfully']);
     } else{
@@ -1661,6 +1701,8 @@ function paystack_webhook(WP_REST_Request $request) {
             ", $reference)
         );
 
+        update_sales_record($reference);
+
         create_and_send_email($customer_email, $reference);
 
         update_providers_availability_spots($reference);
@@ -1774,7 +1816,7 @@ function create_tables() {
         api_key VARCHAR(255) NOT NULL,
         hmac_secret VARCHAR(255),
         paystack_subaccount VARCHAR(255),
-        base_api_url TEXT NOT NULL,
+        base_api_url TEXT DEFAULT NULL,
         active BOOLEAN DEFAULT 1,
         sales_email VARCHAR(255),
         PRIMARY KEY (provider_id)
@@ -1819,7 +1861,20 @@ function create_tables() {
         PRIMARY KEY (booking_id),
         FOREIGN KEY (availability_id) REFERENCES $availability_table(availability_id) ON DELETE CASCADE
     ) $charset_collate;";
-        
+
+    $sale_records = $wpdb->prefix . 'sale_records';
+    $sql5 = "CREATE TABLE IF NOT EXISTS $sale_records (
+        sale_id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        provider_name VARCHAR(100) NOT NULL,
+        service_name VARCHAR(100) NOT NULL,
+        booking_for_date DATETIME NOT NULL,
+        booking_time_slot TIME NOT NULL,
+        booking_time_slot_length_min INT NOT NULL,
+        price_main DECIMAL(10,2) NOT NULL,
+        price_provider DECIMAL(10,2) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (sale_id)
+    ) $charset_collate;";        
 
     require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
     dbDelta($sql0);
@@ -1827,6 +1882,7 @@ function create_tables() {
     dbDelta($sql2);
     dbDelta($sql3);
     dbDelta($sql4);
+    dbDelta($sql5);
 }
 
 add_action('init', 'register_provider_role');
@@ -1857,7 +1913,8 @@ function provider_manager_page() {
 
     if (isset($_POST['add_provider'])) {
         $provider_name = sanitize_text_field($_POST['provider_name']);
-        $base_api_url = esc_url_raw($_POST['base_api_url']);
+        $online= isset($_POST['online']) ? 1 : 0;        
+        $base_api_url = $online ? esc_url_raw($_POST['base_api_url']) : null;
         $paystack_subaccount = sanitize_text_field($_POST['paystack_subaccount']);
         $sales_email = sanitize_email($_POST['sales_email']);
         $api_key = create_api_key();
@@ -1899,7 +1956,8 @@ function provider_manager_page() {
     echo '<form method="post">
         <table class="form-table">
             <tr><th><label for="provider_name">Provider Name</label></th><td><input name="provider_name" required /></td></tr>
-            <tr><th><label for="base_api_url">Base API url</label></th><td><input name="base_api_url" required /></td></tr>
+            <tr><th><label for="online">Online</label></th><td><input type="checkbox" name="online" id="online" value="0" /></td></tr>
+            <tr><th><label for="base_api_url">Base API url</label></th><td><input name="base_api_url" id="base_api_url" /></td></tr>
             <tr><th><label for="paystack_subaccount">Paystack Subaccount</label></th><td><input name="paystack_subaccount" required /></td></tr>
             <tr><th><label for="sales_email">Sales Email</label></th><td><input name="sales_email" type="email" required /></td></tr>
         </table>
@@ -1996,6 +2054,22 @@ function provider_manager_page() {
           toggleBtn.innerHTML = eyeSVG;
         }
       }
+      document.addEventListener("DOMContentLoaded", () => {
+        const onlineCheckbox = document.getElementById("online");
+        const baseUrlInput = document.getElementById("base_api_url");
+
+        function toggleBaseUrl() {
+            if (onlineCheckbox.checked) {
+            baseUrlInput.disabled = false;
+            } else {
+            baseUrlInput.disabled = true;
+            baseUrlInput.value = ""; // clear when unchecked
+            }
+        }
+
+        onlineCheckbox.addEventListener("change", toggleBaseUrl);
+        toggleBaseUrl(); // run on page load
+        });
     </script>
     <?php
 }
@@ -2068,18 +2142,27 @@ function provider_services_manager_page() {
         }
     }
 
+    $availability_table = $wpdb->prefix . 'availability';
+
     // Delete service
     if (isset($_POST['delete_service_id'])) {
         $delete_id = intval($_POST['delete_service_id']);
+        
+        $has_bookings = $wpdb->get_var( $wpdb->prepare(
+            "SELECT COUNT(*) FROM $availability_table WHERE service_id = %d AND status IN ('p','b')",
+            $delete_id
+        ) );
 
-        $valid = $wpdb->get_var($wpdb->prepare(
-            "SELECT COUNT(*) FROM $services_table WHERE service_id = %d AND provider_id = %d",
-            $delete_id, $provider_id
-        ));
-
-        if ($valid) {
-            $wpdb->delete($services_table, ['service_id' => $delete_id]);
-            echo '<div class="updated"><p>Service deleted.</p></div>';
+        if ($has_bookings) {
+            echo '<div class="error"><p>Cannot delete service: there are pending or booked slots.</p></div>';
+        } else {
+            // Safe to delete
+            $deleted = $wpdb->delete($services_table, ['service_id' => $delete_id]);
+            if ($deleted) {
+                echo '<div class="updated"><p>Service deleted.</p></div>';
+            } else {
+                echo '<div class="error"><p>Service deletion failed.</p></div>';
+            }
         }
     }
 
@@ -2132,12 +2215,12 @@ function provider_services_manager_page() {
             echo '<td>R' . esc_html(number_format($service->service_cost_main, 2)) . '</td>';
             echo '<td>' . esc_html($service->max_spots) . '</td>';
             echo '<td>';
-            echo '<form method="post" style="display:inline-block;margin-right:10px;">';
+            echo '<form method="post" style="display:inline-block;margin-right:10px;" onsubmit="return confirm(\'Are you sure you want to delete this service?\');">';
             echo '<input type="hidden" name="delete_service_id" value="' . intval($service->service_id) . '">';
             echo '<input type="submit" class="button button-secondary" value="Delete">';
             echo '</form>';
 
-            echo '<form method="post" style="display:inline-block;">';
+            echo '<form method="post" style="display:inline-block;" onsubmit="return confirm(\'Are you sure you want to update the service cost?\');">';
             echo '<input type="hidden" name="edit_service_id" value="' . intval($service->service_id) . '">';
             echo '<input type="number" name="new_service_cost_provider" placeholder="New Cost" step="0.01" style="width:100px;"> ';
             echo '<input type="submit" name="edit_service_submit" class="button" value="Update">';
@@ -2487,16 +2570,18 @@ function provider_bookings_dashboard_page() {
     $query = "
         SELECT 
             a.available_date AS booking_date,
+            a.time_slot,            
             s.service_name,
             b.booked_by_main,
             b.customer_name,
             b.customer_email,
+            b.customer_number,
             a.session_id
         FROM {$bookings_table} b
         INNER JOIN {$availability_table} a ON b.availability_id = a.availability_id
         INNER JOIN {$services_table} s ON a.service_id = s.service_id
         $where_sql
-        ORDER BY a.available_date ASC, s.service_name ASC
+        ORDER BY a.available_date ASC, a.time_slot ASC, s.service_name ASC
     ";
 
     $results = $wpdb->get_results($wpdb->prepare($query, $params));
@@ -2531,20 +2616,24 @@ function provider_bookings_dashboard_page() {
         echo '<table class="widefat fixed striped">';
         echo '<thead><tr>';
         echo '<th>Date</th>';
+        echo '<th>Time Start</th>';
         echo '<th>Service</th>';
         echo '<th>Booked By Website</th>';
         echo '<th>Customer Name</th>';
-        echo '<th>Customer Email/Phone number</th>';
+        echo '<th>Customer Email</th>';
+        echo '<th>Phone number</th>';
         echo '<th>Reference</th>';
         echo '</tr></thead><tbody>';
 
         foreach ($results as $row) {
             echo '<tr>';
             echo '<td>' . esc_html($row->booking_date) . '</td>';
+            echo '<td>' . esc_html(date('H:i', strtotime($row->time_slot))) . '</td>';
             echo '<td>' . esc_html($row->service_name) . '</td>';
             echo '<td>' . ($row->booked_by_main ? 'Yes' : 'No') . '</td>';
             echo '<td>' . esc_html($row->customer_name) . '</td>';
             echo '<td>' . esc_html($row->customer_email) . '</td>';
+            echo '<td>' . esc_html($row->customer_number) . '</td>';
             echo '<td>' . esc_html($row->session_id) . '</td>';
             echo '</tr>';
         }
@@ -2740,64 +2829,68 @@ function provider_get_all_service_spots_availability(WP_REST_Request $request){
 function main_update_services_availability($provider_info){   
 
     $base_api_url = $provider_info['base_api_url'];
-    $endpoint = $base_api_url . "/main_update_service_availability";
 
-    $api_key = $provider_info['api_key'];
-    $hmac_secret = $provider_info['hmac_secret'];
-    $timestamp = time();
+    if ($base_api_url !== null) {
+        
+        $endpoint = $base_api_url . "/main_update_service_availability";
 
-    $dates_availability = [];
-    foreach ($provider_info['availabilities'] as $avail) {
-        $dates_availability[] = [
-            'id' => $avail['provider_db_id'],
-            'status' => $avail['status'],
-        ];
-    }
+        $api_key = $provider_info['api_key'];
+        $hmac_secret = $provider_info['hmac_secret'];
+        $timestamp = time();
 
-    $payload_array = [
-        'dates_availability' => $dates_availability,
-    ];    
+        $dates_availability = [];
+        foreach ($provider_info['availabilities'] as $avail) {
+            $dates_availability[] = [
+                'id' => $avail['provider_db_id'],
+                'status' => $avail['status'],
+            ];
+        }
 
-    $payload_json = json_encode($payload_array);
+        $payload_array = [
+            'dates_availability' => $dates_availability,
+        ];    
 
-    $signature = hash_hmac('sha256', $payload_json . $timestamp, $hmac_secret);
+        $payload_json = json_encode($payload_array);
 
-    $response = wp_remote_post($endpoint, [
-        'headers' => [
-            'Content-Type' => 'application/json',
-            'X-API-KEY' => $api_key,
-            'X-Signature' => $signature,
-            'X-Timestamp' => $timestamp,
-        ],
-        'body' => $payload_json,
-        'timeout' => 15,
-    ]);
+        $signature = hash_hmac('sha256', $payload_json . $timestamp, $hmac_secret);
 
-    $status_code = wp_remote_retrieve_response_code($response);
-    $body = wp_remote_retrieve_body($response);
-    $body_json = json_decode($body, true);
+        $response = wp_remote_post($endpoint, [
+            'headers' => [
+                'Content-Type' => 'application/json',
+                'X-API-KEY' => $api_key,
+                'X-Signature' => $signature,
+                'X-Timestamp' => $timestamp,
+            ],
+            'body' => $payload_json,
+            'timeout' => 15,
+        ]);
 
-    if (is_wp_error($response)) {
-    error_log('Request failed: ' . $response->get_error_message());
-    return [
-        'success' => false,
-        'error' => 'Request failed: ' . $response->get_error_message(),
-    ];
-    }
+        $status_code = wp_remote_retrieve_response_code($response);
+        $body = wp_remote_retrieve_body($response);
+        $body_json = json_decode($body, true);
 
-    if ($status_code < 200 || $status_code >= 300) {
-        error_log("API responded with status code $status_code: $body");
+        if (is_wp_error($response)) {
+        error_log('Request failed: ' . $response->get_error_message());
         return [
             'success' => false,
-            'error' => "API responded with status code $status_code",
-            'response_body' => $body_json,
+            'error' => 'Request failed: ' . $response->get_error_message(),
+        ];
+        }
+
+        if ($status_code < 200 || $status_code >= 300) {
+            error_log("API responded with status code $status_code: $body");
+            return [
+                'success' => false,
+                'error' => "API responded with status code $status_code",
+                'response_body' => $body_json,
+            ];
+        }
+            
+        return [
+            'success' => true,
+            'data' => $body_json,
         ];
     }
-        
-    return [
-        'success' => true,
-        'data' => $body_json,
-    ];
 }
 
 function verify_and_decrypt_response($request){
@@ -3043,8 +3136,6 @@ function create_and_send_provider_emails($session_id){
     }
 }
 
-
-
 function generate_html_email_for_provider($availability_rows, $session_id) {
     $grouped = [];
 
@@ -3097,6 +3188,46 @@ function generate_html_email_for_provider($availability_rows, $session_id) {
     $html .= '</body></html>';
 
     return $html;
+}
+
+function update_sales_record($session_id){    
+    global $wpdb;
+
+    $availability_table = $wpdb->prefix . 'availability';
+    $services_table = $wpdb->prefix . 'services';
+    $provider_sites_table = $wpdb->prefix . 'provider_sites';
+    $sale_records_table = $wpdb->prefix . 'sale_records';
+
+    $sale_data = $wpdb->get_row( $wpdb->prepare(
+        "SELECT 
+            p.provider_name,
+            s.service_name,
+            a.available_date,
+            a.time_slot,
+            a.time_slot_length_min,
+            s.service_cost_main,
+            s.service_cost_provider
+        FROM $availability_table a
+        JOIN $services_table s ON a.service_id = s.service_id
+        JOIN $provider_sites_table p ON s.provider_id = p.provider_id
+        WHERE a.session_id = %s",
+        $session_id
+    ) );
+
+    if ($sale_data) {
+        $wpdb->insert(
+            $sale_records_table,
+            [
+                'provider_name'               => $sale_data->provider_name,
+                'service_name'                => $sale_data->service_name,
+                'booking_for_date'            => $sale_data->available_date,
+                'booking_time_slot'           => $sale_data->time_slot,
+                'booking_time_slot_length_min'=> $sale_data->time_slot_length_min,
+                'price_main'                  => $sale_data->service_cost_main,
+                'price_provider'              => $sale_data->service_cost_provider,
+            ]
+        );
+    }
 }
 
 

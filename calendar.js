@@ -83,7 +83,7 @@ document.addEventListener("DOMContentLoaded", function () {
       return;
     }
 
-    alert("You will be redirected shortly.");
+    document.getElementById("redirect-message").style.display = "block";
 
     fetch(rest_object.rest_url + "init_payment", {
       method: "POST",
@@ -109,6 +109,7 @@ document.addEventListener("DOMContentLoaded", function () {
         }else {
           console.error("Payment init failed:", data.message || data);
           alert("There was an error. Please try again.");
+          document.getElementById("redirect-message").style.display = "none";
         }
       })
       .catch((err) => console.error("REST error:", err));

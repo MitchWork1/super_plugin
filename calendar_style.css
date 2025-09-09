@@ -4,22 +4,22 @@
   font-family: Arial, sans-serif;
 }
 
-label {
-  display: inline-block;
-  margin: 0 10px 10px 0;
-  font-weight: bold;  
-}
-
-select {
-  margin-right: 20px;
-  padding: 5px;
-  min-width: 180px;
-}
-
 #my-calendar {
   border: 1px solid #ccc;
   box-shadow: 0 0 8px rgba(0,0,0,0.1);
   user-select: none;
+}
+
+.selection-rows {
+    display: flex;    
+    margin-bottom: 10px;
+}
+
+.selection-rows label {
+    display: inline-block;
+    width: 130px;
+    font-weight: bold;  
+    padding-bottom: 5px;
 }
 
 .calendar-header {
