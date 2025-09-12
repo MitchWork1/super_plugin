@@ -162,21 +162,24 @@
 }
 
 #booking_summary h2 {
-  font-size: 30px;
+  font-size: 30px !important;
   font-weight: bold;
   border-bottom: 2px solid black;
   padding-bottom: 5px;              
-  margin-bottom: 12px;
+  margin: 10px 0 12px 0;
 }
 
 #booking_summary h3 {
-  font-size: 25px;
+  font-size: 30px !important;
   font-weight: bold;
-  margin-bottom: 10px;
+  margin: 10px 0 5px 0;
+  text-decoration: underline;
 }
 
 #booking_summary h4 {
-  margin-top: 10px;
+  font-size: 22px !important;
+  margin: 5px 0;
+  text-decoration: none;
 }
 
 
@@ -258,6 +261,25 @@
   cursor: not-allowed;
 }
 
+.pcp-book-btn {
+    display: inline-block;
+    border: 2px solid #000000;
+    border-radius: 6px;
+    padding: 10px 20px;
+    background-color: #4caf50;;
+    color: #000000 !important;
+    text-decoration: none;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.2s ease;    
+}
+
+.pcp-book-btn:hover {
+    background-color: #4caf50;
+    color: #ffffff !important;
+}
+
+
 @media (max-width: 768px) {
   #calendar-container {
     max-width: 100%;
@@ -293,6 +315,7 @@
     margin-top: 2px;
     border-width: 1px;
   }
+  
 
   .slots-table {
     display: block;
@@ -351,6 +374,14 @@
 label,
 select {
   display: block;
+}
+
+#callback-ui div {
+    max-width: 90%;
+}
+
+#callback-ui h3, #callback-ui p {
+    font-size: 18px; /* smaller text on mobile */
 }
 
 }

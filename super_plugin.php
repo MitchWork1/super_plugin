@@ -38,6 +38,30 @@ function enqueue_custom_calendar_assets() {
     ]);
 }
 
+add_action('admin_enqueue_scripts', 'enqueue_chartjs');
+
+function enqueue_chartjs($hook) {
+    if ($hook !== 'toplevel_page_provider-payments-dashboard') return;
+    wp_enqueue_script('chartjs','https://cdn.jsdelivr.net/npm/chart.js',[],null,true);
+}
+
+
+add_shortcode('book_btn_redirect', 'pcp_book_btn_redirect_shortcode');
+
+function pcp_book_btn_redirect_shortcode($atts = []) {
+    $atts = array_change_key_case( (array) $atts, CASE_LOWER );
+
+    $book_btn_atts = shortcode_atts(
+		array(
+			'provider_id' => '0',
+		), $atts
+	);
+
+    $provider_id = esc_html($book_btn_atts['provider_id']);
+    $redirect_url = site_url('/booking?provider_id=' . urlencode($provider_id));
+
+    return '<a href="' . esc_url($redirect_url) . '" class="pcp-book-btn">Book Now! </a>';
+}
 
 add_shortcode('custom_calendar', 'pcp_custom_calendar_shortcode');
 
@@ -89,7 +113,7 @@ function pcp_custom_calendar_shortcode() {
             </div>
         </div>
         <div id="booking_summary" style="display: none;">
-            <h2>Booking Summary</h2>    
+            <h2>Booking Summary</h4>    
         </div>
         <div id="booking_total" class="booking-total" style="display:none;">
             <table id="booking_total_table" class="booking-total-table"> 
@@ -103,19 +127,44 @@ function pcp_custom_calendar_shortcode() {
             <button id="checkout_button" class="checkout-btn">Checkout</button>
         </div>
     </div>
+        <div id="callback-ui" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background-color:rgba(0,0,0,0.6); z-index:9999; align-items:center; justify-content:center;">
+            <div style="background:#fff; padding:20px; border-radius:8px; max-width:400px; width:90%; box-shadow:0 4px 10px rgba(0,0,0,0.2); text-align:center;">
+                <h3 style="margin:0 0 5px 0;">Payment/Booking Succesful!</h3>
+                <p style="margin:0 0 5px 0;">Your payment/booking was successful! Thank you for your support and see you on the Trail.</p>
+                <img src="https://capekelpforesttrail.co.za/wp-content/uploads/2025/09/cropped-cropped-logo-latest-transparent-bg-scaled-1.jpg" 
+                    alt="Logo"
+                    style="max-width:100%; height:auto; display:block; margin:0px auto;">
+                <button id="callback-ui-ok" style="padding:10px 30px;">Ok</button>
+            </div>
+        </div>
+    <div id="timer-ui" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background-color:rgba(0,0,0,0.6); z-index:9999; align-items:center; justify-content:center;">
+        <div style="background:#fff; padding:20px; border-radius:8px; max-width:400px; width:90%; box-shadow:0 4px 10px rgba(0,0,0,0.2);">
+            <h3 style="margin:0 0 5px 0;">Are you still booking?</h3>
+            <button id="timer-renew" style="padding:8px 12px;">Extend Session</button>
+            <button id="timer-cancel" style="padding:8px 12px;">Cancel Session</button>
+        </div>
+    </div>
+    <div id="timer-done-ui" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background-color:rgba(0,0,0,0.6); z-index:9999; align-items:center; justify-content:center;">
+        <div style="background:#fff; padding:20px; border-radius:8px; max-width:400px; width:90%; box-shadow:0 4px 10px rgba(0,0,0,0.2);">
+            <h3 style="margin:0 0 5px 0;">Session cannot be extended any further. Pleasex finish booking.</h3>
+            <button id="timer-done-ok" style="padding:8px 12px;">Ok</button>
+        </div>
+    </div>
     <div id="client-info-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background-color:rgba(0,0,0,0.6); z-index:9999; align-items:center; justify-content:center;">
-        <div style="background:#fff; padding:20px; border-radius:8px; max-width:300px; width:90%; box-shadow:0 4px 10px rgba(0,0,0,0.2);">
-            <h3 style="margin-top:0;">Enter Details to continue</h3>
+        <div style="background:#fff; padding:20px; border-radius:8px; max-width:400px; width:90%; box-shadow:0 4px 10px rgba(0,0,0,0.2);">
+            <h3 style="margin:0 0 5px 0;">Enter Details to continue</h3>
             <label for="client-name">Name:</label><br>
             <input type="text" id="client-name" style="width:100%; padding:8px; margin-bottom:10px;"><br>
             <label for="client-name">Phone Number:</label><br>
-            <input type="text" id="client-number" style="width:100%; padding:8px;"><br><br>
+            <input type="text" id="client-number" style="width:100%; padding:8px; margin-bottom:10px;"><br>
             <label for="client-name">Email:</label><br>
             <input type="email" id="client-email" style="width:100%; padding:8px;"><br><br>
             <button id="submit-client-info" style="padding:8px 12px;">Continue</button>
             <button id="cancel-client-info" style="padding:8px 12px; background:#ccc; margin-left:10px;">Cancel</button>
 
             <p id="redirect-message" style="margin-top:15px; font-weight:bold; color:green; display:none;">You will be redirected shortly.</p>
+
+            <div style="font-size:12px;color:#888;margin-top:20px;">Disclaimer: There is a non-refundable admin fee included in your payment - For cancellations and refunds of activities, please contact your chosen service provider directly.</div>
         </div>
     </div>
     </div>
@@ -1212,11 +1261,12 @@ function pcp_book_spot_in_avail_rest($request) {
 
         if ($updated) {
             $selected_availability_id = $availability_id;
-            break;
+            break; 
         }
     }
 
     if ($selected_availability_id) {
+        update_providers_availability_spots($session_id);
         return new WP_REST_Response([
             'success' => true,
             'message' => 'Spot reserved',
@@ -1227,9 +1277,7 @@ function pcp_book_spot_in_avail_rest($request) {
             'success' => false,
             'message' => 'Sorry, spot is already reserved by someone else!'
         ], 409);
-    }
-
-    update_providers_availability_spots($session_id);
+    }    
 
     return new WP_REST_Response(['success' => true, 'message' => 'Spot reserved as pending'], 200);
 }
@@ -1408,6 +1456,10 @@ function pcp_extend_hold($request) {
 
     return new WP_REST_Response(['success' => true, 'message' => 'Hold unitl updated'], 200);
 }
+
+
+
+
 
 
 
@@ -2646,6 +2698,89 @@ function provider_bookings_dashboard_page() {
     echo '</div>';
 }
 
+add_action('admin_menu', 'provider_payments_dashboard_menu');
+
+function provider_payments_dashboard_menu() {
+        if (current_user_can('provider')) {
+            add_menu_page(
+                'Payments',
+                'Payments',
+                'read',
+                'provider-payments-dashboard',
+                'provider_payments_dashboard_page',
+                'dashicons-cart',
+                5
+            );
+        }
+}
+
+function provider_payments_dashboard_page() {
+    global $wpdb;
+    $providers_table   = $wpdb->prefix . 'provider_sites';
+    //$sales_table  = $wpdb->prefix . 'sales_records';
+    $current_user = wp_get_current_user();
+    $username     = $current_user->user_login;
+
+    $provider = $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM {$providers_table} WHERE provider_name = %s",
+        $username
+    ));
+
+    if (!$provider) {
+        echo '<div class="notice notice-error"><p>Provider not found.</p></div>';
+        return;
+    }
+    
+    /*$services = $wpdb->get_results($wpdb->prepare(
+        "SELECT DISTINCT service_name FROM {$sales_table} WHERE provider_name = %s",
+        $username
+    ));*/
+
+    //Register Rest Route
+    $rest_url = esc_url_raw(rest_url('pcp/v1/'));
+    $rest_nonce = wp_create_nonce('wp_rest');
+
+    ?>
+    <script>
+        const rest_object = {
+            rest_url: "<?= $rest_url ?>",
+            nonce: "<?= $rest_nonce ?>"
+        };
+    </script>
+
+    <div>
+        <canvas id="salesChart"></canvas>
+    </div> 
+    <script>
+        window.onload = function() {
+            const salesChart = document.getElementById("salesChart");
+            new Chart(salesChart, {
+                type: 'bar',
+                data: {
+                labels: ['Red', 'Blue', 'Yellow', 'Green', 'Purple', 'Orange'],
+                datasets: [{
+                    label: '# of Votes',
+                    data: [12, 19, 3, 5, 2, 3],
+                    borderWidth: 1
+                }]
+                },
+                options: {
+                scales: {
+                    y: {
+                    beginAtZero: true
+                    }
+                }
+                }
+            });
+        }
+
+    </script>
+    <?php
+
+}
+
+
+
 
 
 //=============
@@ -3053,29 +3188,37 @@ function generate_html_email_from_availability($availability_rows, $session_id) 
     }
 
     // Start HTML output
-    $html = '<html><body style="font-family: Arial, sans-serif;">';
+    $html = '<div style="font-family: Arial, sans-serif;">';
     $html .= '<h2 style="color:#2c3e50;">Tickets</h2>';
-        $html .= '<p style="font-size:14px;color:#555;"><strong>Reference code:</strong> ' . esc_html($session_id) . '</p>';
+    $html .= '<p style="font-size:14px;color:#555;"><strong>Reference code:</strong> ' . esc_html($session_id) . '</p>';
 
     foreach ($grouped as $provider_name => $services) {
-        $html .= "<h3 style='color:#2980b9;'>$provider_name</h3>";
+        $provider_name = esc_html($provider_name);
+        $html .= "<h3 style='color:#2980b9;margin-bottom:5px;'>$provider_name</h3>";
 
         foreach ($services as $service_name => $tickets) {
-            $html .= "<h4 style='color:#27ae60;margin-left:20px;'>$service_name</h4>";
+            $service_name = esc_html($service_name);
+            $html .= "<h4 style='color:#27ae60;margin-left:20px;margin-bottom:3px;'>$service_name</h4>";
             $html .= "<ul style='margin-left:40px;'>";
 
             foreach ($tickets as $ticket) {
-                $html .= "<li><strong>Date:</strong> {$ticket['available_date']} | 
-                          <strong>Time:</strong> {$ticket['from_time']} - {$ticket['to_time']}</li>";
+                $ticket_date = esc_html($ticket['available_date']);
+                $ticket_from = esc_html($ticket['from_time']);
+                $ticket_to = esc_html($ticket['to_time']);
+
+                $html .= "<li><strong>Date:</strong> {$ticket_date} | 
+                        <strong>Time:</strong> {$ticket_from} - {$ticket_to}</li>";
             }
 
             $html .= "</ul>";
         }
     }
 
-    $html .= '</body></html>';
+    $html .= '<div style="font-size:12px;color:#888;margin-top:20px;">Disclaimer: There is a non-refundable admin fee included in your payment - For cancellations and refunds of activities, please contact your chosen service provider directly.</div>';
+    $html .= '</div>';
 
     return $html;
+
 }
 
 function create_and_send_provider_emails($session_id){

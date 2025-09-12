@@ -9,12 +9,20 @@ document.addEventListener("DOMContentLoaded", function () {
   const continueBtn = document.getElementById("submit-client-info");
   const cancelBtn = document.getElementById("cancel-client-info");
   const bookingSummary = document.getElementById("booking_summary");
+  const timerUi = document.getElementById("timer-ui");
+  const renewBtn = document.getElementById("timer-renew");
+  const timerCancelBtn = document.getElementById("timer-cancel");
+  const timerOkBtn = document.getElementById("timer-done-ok");
+  const timerDoneUI = document.getElementById("timer-done-ui");
+  const callbackUi = document.getElementById("callback-ui");
+  const callbackUiOKBtn = document.getElementById("callback-ui-ok");
   let countdownTime = 600;
   let timerInterval = null;
   const timerDisplay = document.getElementById("timer-display");
   const timer_reset_max = 3;
   let timer_reset_current= 0;
   let timerStarted = false;
+  let clientModalOpen = false;
 
 
   const shortWeekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -41,6 +49,12 @@ document.addEventListener("DOMContentLoaded", function () {
   //Check if cusotmer came form callback
   const queryParams = new URLSearchParams(window.location.search);
   const reference = queryParams.get("reference");
+  const provider_id = queryParams.get("provider_id");
+
+  if (provider_id) {
+    providerSelect.value = provider_id;
+    providerSelect.dispatchEvent(new Event("change"));
+  }
 
   if(reference)
   {
@@ -55,7 +69,7 @@ document.addEventListener("DOMContentLoaded", function () {
         .then((response) => response.json())
         .then((data) => {
           if (data.success) {
-            alert("Booking Succesful! An email will be sent to you shortly. If not recieved within 30 minutes contact suppourt.");
+            callbackUi.style.display = "flex";
             window.history.replaceState({}, document.title, window.location.pathname);
           } else {
             console.error("Verification failed:", data.error || data.message);
@@ -66,6 +80,10 @@ document.addEventListener("DOMContentLoaded", function () {
           console.error("Error contacting verification endpoint:", error);
         });
   }
+
+  callbackUiOKBtn.addEventListener("click", function(){
+    callbackUi.style.display = "none";
+  });
 
 
   let $services_info = [];
@@ -117,12 +135,14 @@ document.addEventListener("DOMContentLoaded", function () {
 
   cancelBtn.addEventListener("click", function () {
     clientModal.style.display = "none"; // close modal
+    clientModalOpen = false;
   });
 
   checkoutButton.addEventListener("click", function (e) {
     e.preventDefault();
     //Customer enter details
     clientModal.style.display = "flex";
+    clientModalOpen = true;
   });
 
   let currentYear, currentMonth, currentDate;
@@ -144,14 +164,15 @@ function releaseSpots() {
   }
 }
 
+/*
 document.addEventListener("visibilitychange", function () {
   if (document.visibilityState === "hidden") {
     releaseSpots();
   }
 });
+*/
 
 window.addEventListener("pagehide", releaseSpots);
-
 
   prevBtn.addEventListener("click", () => {
     if (currentMonth === 0) {
@@ -738,31 +759,61 @@ function startTimer(reset = false) {
     timerInterval = setInterval(() => {
         countdownTime--;
         timerDisplay.textContent = formatTime(countdownTime);
-
         
-        if (countdownTime <= 300) { 
-            clearInterval(timerInterval);
+        if (countdownTime <= 300 && countdownTime > 1) { 
             askUserStillBusy();
+        }
+        else if (countdownTime <= 1)
+        {
+          window.location.reload();
         }
     }, 1000);
 }
 
 function askUserStillBusy() {
-    const stillBusy = confirm("Are you still completing your booking? Click OK to continue.");
+  if (timer_reset_current < timer_reset_max)
+  {
+    if(clientModalOpen)
+    {
+      clientModal.style.display = "none";
+    }    
+    timerUi.style.display = "flex";
+  }
+  else
+  {
+    if(clientModalOpen)
+    {
+      clientModal.style.display = "none";
+    }  
+    timerDoneUI.style.display = "flex";    
+  }    
+}
 
-    if (stillBusy) {
+timerOkBtn.addEventListener("click", function(){
+  timerDoneUI.style.display = "none";
+  if(clientModalOpen)
+    {
+      clientModal.style.display = "flex";
+    }
+  
+})
+
+renewBtn.addEventListener("click", function (){
         if (timer_reset_current < timer_reset_max) {
             extendBookingHold(sessionId)
             timer_reset_current++;
             startTimer(true);
-        } else {
-            alert("Maximum waiting time reached. Please complete your booking soon.");
-            window.location.reload();
-        }
-    } else {
-        window.location.reload();
+            timerUi.style.display = "none";
+  if(clientModalOpen)
+    {
+      clientModal.style.display = "flex";
     }
-}
+        }
+});
+
+timerCancelBtn.addEventListener("click", function(){
+  window.location.reload();
+});
 
 function formatTime(seconds) {
     const mins = Math.floor(seconds / 60);
