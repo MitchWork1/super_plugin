@@ -45,23 +45,109 @@ function enqueue_chartjs($hook) {
     wp_enqueue_script('chartjs','https://cdn.jsdelivr.net/npm/chart.js',[],null,true);
 }
 
-
+/*
 add_shortcode('book_btn_redirect', 'pcp_book_btn_redirect_shortcode');
 
 function pcp_book_btn_redirect_shortcode($atts = []) {
-    $atts = array_change_key_case( (array) $atts, CASE_LOWER );
+    $atts = array_change_key_case((array) $atts, CASE_LOWER);
 
     $book_btn_atts = shortcode_atts(
-		array(
-			'provider_id' => '0',
-		), $atts
-	);
+        array(
+            'provider_id' => '0',
+        ), 
+        $atts
+    );
 
-    $provider_id = esc_html($book_btn_atts['provider_id']);
-    $redirect_url = site_url('/booking?provider_id=' . urlencode($provider_id));
+    $provider_id = intval($book_btn_atts['provider_id']);
+    $redirect_url = add_query_arg('provider_id', $provider_id, site_url('/booking'));
 
-    return '<a href="' . esc_url($redirect_url) . '" class="pcp-book-btn">Book Now! </a>';
+    return '<a href="' . esc_url($redirect_url) . '" class="pcp-book-btn">Book Now!</a>';
 }
+*/
+
+add_shortcode('ticket_verification', 'pcp_ticket_verification_shortcode');
+
+function pcp_ticket_verification_shortcode() {
+    if (!isset($_GET['reference'])) {
+        return "<p>No reference number provided.</p>";
+    }
+
+    global $wpdb;
+
+    $session_id = sanitize_text_field($_GET['reference']);
+
+    // Query availability
+    $query = $wpdb->prepare("
+        SELECT 
+            a.available_date,
+            a.time_slot,
+            a.time_slot_length_min,
+            a.service_id,
+            s.service_name,
+            s.provider_id,
+            p.provider_name
+        FROM {$wpdb->prefix}availability a
+        INNER JOIN {$wpdb->prefix}services s ON a.service_id = s.service_id
+        INNER JOIN {$wpdb->prefix}provider_sites p ON s.provider_id = p.provider_id
+        WHERE a.session_id = %s
+    ", $session_id);
+
+    $results = $wpdb->get_results($query, ARRAY_A);
+
+    if (!$results) {
+        return "<p>No tickets found for reference <strong>" . esc_html($session_id) . "</strong>.</p>";
+    }
+
+    // Group results by provider > service
+    $grouped = [];
+    foreach ($results as $row) {
+        $provider = $row['provider_name'];
+        $service = $row['service_name'];
+
+        $start_time = DateTime::createFromFormat('H:i:s', $row['time_slot']);
+        $from_time = $start_time->format('H:i');
+        $start_time->modify("+" . $row['time_slot_length_min'] . " minutes");
+        $to_time = $start_time->format('H:i');
+
+        $grouped[$provider][$service][] = [
+            'available_date' => $row['available_date'],
+            'from_time' => $from_time,
+            'to_time' => $to_time,
+        ];
+    }
+
+
+    $html  = '<div style="font-family: Arial, sans-serif; display:flex; justify-content:center; margin-top:30px;">';
+    $html .= '<div style="max-width:700px; width:100%; background:#fff; padding:20px; border-radius:10px; box-shadow:0 4px 12px rgba(0,0,0,0.1); text-align:center;">';
+    $html .= '<h2 style="color:#2c3e50;">Tickets</h2>';
+    $html .= '<p style="font-size:14px;color:#555;"><strong>Reference number:</strong> ' . esc_html($session_id) . '</p>';
+
+    foreach ($grouped as $provider_name => $services) {
+        $html .= "<h3 style='color:#2980b9; margin-bottom:5px;'>" . esc_html($provider_name) . "</h3>";
+
+        foreach ($services as $service_name => $tickets) {
+            $html .= "<h4 style='color:#27ae60; margin-bottom:3px;'>" . esc_html($service_name) . "</h4>";
+            $html .= "<ul style='list-style-position: inside; padding-left:0; margin: 10px auto; display:inline-block; text-align:left;'>";
+
+            foreach ($tickets as $ticket) {
+                $ticket_date = esc_html($ticket['available_date']);
+                $ticket_from = esc_html($ticket['from_time']);
+                $ticket_to   = esc_html($ticket['to_time']);
+
+                $html .= "<li><strong>Date:</strong> {$ticket_date} | <strong>Time:</strong> {$ticket_from} - {$ticket_to}</li>";
+            }
+
+            $html .= "</ul>";
+        }
+    }
+
+    $html .= '</div>';
+    $html .= '</div>';
+
+    return $html;
+}
+
+
 
 add_shortcode('custom_calendar', 'pcp_custom_calendar_shortcode');
 
@@ -72,45 +158,48 @@ function pcp_custom_calendar_shortcode() {
 
     ob_start(); ?>
     <div class="calendar-scroll-wrapper">
-    <div id="calendar-container">
-        <div id="timer-display">10:00</div>
-        <div class="selection-rows">
-        <label for="provider-select">Select Provider:</label>
-        <select id="provider-select">
-            <option value="">-- Select Provider --</option>
-            <?php foreach ($providers as $provider): ?>
-                <option value="<?= esc_attr($provider->provider_id); ?>">
-                    <?= esc_html($provider->provider_name); ?>
-                </option>
-            <?php endforeach; ?>
-        </select>
+        <div id="calendar-container">
+            <div id="timer-display">10:00</div>
+                <div class="selection-rows">
+                <label for="provider-select">Select Provider:</label>
+                <select id="provider-select">
+                    <option value="">-- Select Provider --</option>
+                    <?php foreach ($providers as $provider): ?>
+                        <option value="<?= esc_attr($provider->provider_id); ?>">
+                            <?= esc_html($provider->provider_name); ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
             </div>
-        <div class="selection-rows">
-        <label for="service-select">Select Service:  </label>
-        <select id="service-select" disabled>
-            <option value="">-- Select Provider First --</option>
-        </select>
+            <div class="selection-rows">
+                <label for="service-select">Select Service:  </label>
+                <select id="service-select" disabled>
+                    <option value="">-- Select Provider First --</option>
+                </select>
+            </div>
+            <div id="service_description_div" style="display: none;">
+                <h6 id=service_description_header>Service Description</h6>
+                <p id=service_description>Text</p>
+            </div>
+            <div id="calendar-controls" style="display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin: 10px 0;">
+                <button id="prev-month" disabled>&laquo; Previous</button>
+                <span id="calendar-title" style="font-weight: bold;"></span>
+                <button id="next-month">Next &raquo;</button>
             </div>
 
-         <div id="calendar-controls" style="display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin: 10px 0;">
-            <button id="prev-month" disabled>&laquo; Previous</button>
-            <span id="calendar-title" style="font-weight: bold;"></span>
-            <button id="next-month">Next &raquo;</button>
-        </div>
-
-        <div id="my-calendar">
-            <div class="calendar-header">
-                <div>Monday</div>
-                <div>Tuesday</div>
-                <div>Wednesday</div>
-                <div>Thursday</div>
-                <div>Friday</div>
-                <div>Saturday</div>
-                <div>Sunday</div>
-            </div>
-            <div class="calendar-body" id="calendar-body">
-                <!-- Days + slots will appear here -->
-            </div>
+            <div id="my-calendar">
+                <div class="calendar-header">
+                    <div>Monday</div>
+                    <div>Tuesday</div>
+                    <div>Wednesday</div>
+                    <div>Thursday</div>
+                    <div>Friday</div>
+                    <div>Saturday</div>
+                    <div>Sunday</div>
+                </div>
+                <div class="calendar-body" id="calendar-body">
+                    <!-- Days + slots will appear here -->
+                </div>
         </div>
         <div id="booking_summary" style="display: none;">
             <h2>Booking Summary</h4>    
@@ -164,7 +253,7 @@ function pcp_custom_calendar_shortcode() {
 
             <p id="redirect-message" style="margin-top:15px; font-weight:bold; color:green; display:none;">You will be redirected shortly.</p>
 
-            <div style="font-size:12px;color:#888;margin-top:20px;">Disclaimer: There is a non-refundable admin fee included in your payment - For cancellations and refunds of activities, please contact your chosen service provider directly.</div>
+            <div style="font-size:12px;color:#888;margin-top:20px;;">Disclaimer: There is a non-refundable admin fee included in your payment - For cancellations and refunds of activities, please contact your chosen service provider directly.</div>
         </div>
     </div>
     </div>
@@ -192,7 +281,7 @@ function pcp_rest_get_services(WP_REST_Request $request) {
     $services_table = $wpdb->prefix . 'services';
 
     $services = $wpdb->get_results($wpdb->prepare(
-        "SELECT service_id, service_name, service_cost_main FROM $services_table WHERE provider_id = %d",
+        "SELECT service_id, service_name, service_cost_main, service_description FROM $services_table WHERE provider_id = %d",
         $provider_id
     ));
 
@@ -1458,12 +1547,6 @@ function pcp_extend_hold($request) {
 }
 
 
-
-
-
-
-
-
 add_action('rest_api_init', function () {
     register_rest_route('pcp/v1', '/init_payment', [
         'methods'             => 'POST',
@@ -1495,11 +1578,23 @@ function pcp_rest_init_payment($request) {
         return new WP_REST_Response(['error' => 'Missing customer_email'], 400);
     }
 
-    $paystack_secret = $wpdb->get_var("
-        SELECT paystack_api_key_secret
+    $paystack_info_row = $wpdb->get_row("
+        SELECT paystack_live, paystack_api_key_test, paystack_api_key_secret
         FROM {$wpdb->prefix}paystack_info
         WHERE id = 1
     ");
+
+    if ($paystack_info_row) {
+        $live_mode = (int) $paystack_info_row->paystack_live;
+        if ($live_mode === 0) {
+            $paystack_secret = $paystack_info_row->paystack_api_key_test;
+        } else {
+            $paystack_secret = $paystack_info_row->paystack_api_key_secret;
+        }
+    } else {
+        $paystack_secret = '';
+    }    
+    
 
     if (empty($paystack_secret)) {
         return new WP_REST_Response(['error' => 'No paystack secret key'], 500);
@@ -1510,7 +1605,8 @@ function pcp_rest_init_payment($request) {
             a.availability_id,
             s.service_cost_main,
             s.service_cost_provider,
-            p.paystack_subaccount
+            p.paystack_subaccount,
+            p.paystack_subaccount_test
         FROM 
             {$wpdb->prefix}availability a
         JOIN 
@@ -1529,7 +1625,14 @@ function pcp_rest_init_payment($request) {
     $total_cost = 0;
 
     foreach ($results as $row) {
-        $paystack_subaccount = $row['paystack_subaccount'];
+        if($live_mode === 0)
+        {
+            $paystack_subaccount = $row['paystack_subaccount_test'];
+        }
+        else{
+            $paystack_subaccount = $row['paystack_subaccount'];
+        }
+        
         $cost_provider = floatval($row['service_cost_provider']);
         $cost_main = floatval($row['service_cost_main']);
         $availability_id = intval($row['availability_id']);
@@ -1547,7 +1650,7 @@ function pcp_rest_init_payment($request) {
         $total_cost += $cost_main;
     }
 
-    $split = build_split($provider_data, $total_cost);
+    $split = build_split($provider_data, $total_cost, $live_mode);
 
     $split_code = get_split_code($split, $paystack_secret);    
 
@@ -1594,6 +1697,7 @@ function pcp_rest_init_payment($request) {
 
 
     foreach($results as $row) {
+        $availability_id = intval($row['availability_id']);
         $already_booked = $wpdb->get_var($wpdb->prepare(
             "SELECT COUNT(*) FROM {$wpdb->prefix}bookings WHERE availability_id = %d",
             $availability_id
@@ -1625,7 +1729,7 @@ function pcp_rest_init_payment($request) {
 }
 
 
-function build_split($provider_data, $total_cost){
+function build_split($provider_data, $total_cost, $live_mode){
     $subaccounts = [];
     $operational_cost = intval($total_cost * 100 * 0.01); //1%, *100 for kobo
 
@@ -1633,17 +1737,26 @@ function build_split($provider_data, $total_cost){
 
     foreach ($provider_data as $data) {
         $share = intval($data['provider_total'] * 100);
-
         $subaccounts[] = [
             'subaccount' => $data['paystack_subaccount'],
             'share' => $share
         ];
     }    
 
-    $subaccounts[] = [
-        'subaccount' => 'ACCT_2try0nqlasfaj7i', //MY_PACKSTACK CODE HARDCODE REPLACE ADD
-        'share' => $operational_cost //MY SHARE 
-    ];
+    
+        if($live_mode === 0)
+        {
+            $subaccounts[] = [
+                'subaccount' => 'ACCT_nwd4b21sk8j3xby', //MY_PACKSTACK CODE HARDCODE REPLACE ADD
+                'share' => $operational_cost //MY SHARE 
+            ];
+        }
+        else{
+            $subaccounts[] = [
+                'subaccount' => 'ACCT_0jrt44sizueubsp', //MY_PACKSTACK CODE HARDCODE REPLACE ADD
+                'share' => $operational_cost //MY SHARE 
+            ];
+        }    
 
     return $subaccounts;
 }
@@ -1818,28 +1931,14 @@ function generate_session_id_rest(WP_REST_Request $request) {
     global $wpdb;
 
     $table = $wpdb->prefix . 'availability'; 
-    $max_attempts = 5;
 
-    for ($i = 0; $i < $max_attempts; $i++) {
-        $session_id = uniqid('', true);
+    $session_id = bin2hex(random_bytes(4)) . uniqid('', true);
 
-        $count = $wpdb->get_var($wpdb->prepare(
-            "SELECT COUNT(*) FROM $table WHERE session_id = %s",
-            $session_id
-        ));
+    return rest_ensure_response([
+        'success' => true,
+        'data' => ['session_id' => $session_id]
+    ]);
 
-        if ($count == 0) {
-            return rest_ensure_response([
-                'success' => true,
-                'data' => ['session_id' => $session_id]
-            ]);
-        }
-    }
-
-    return new WP_REST_Response([
-        'success' => false,
-        'message' => 'Could not generate unique session ID'
-    ], 500);
 }
 
 
@@ -1858,6 +1957,8 @@ function create_tables() {
         id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,        
         paystack_api_key_secret VARCHAR(255) NOT NULL,
         paystack_api_key_public VARCHAR(255),
+        paystack_api_key_test VARCHAR(255),
+        paystack_live BOOLEAN NOT NULL DEFAULT 0,
         PRIMARY KEY (id)
     ) $charset_collate;";
 
@@ -1868,6 +1969,7 @@ function create_tables() {
         api_key VARCHAR(255) NOT NULL,
         hmac_secret VARCHAR(255),
         paystack_subaccount VARCHAR(255),
+        paystack_subaccount_test VARCHAR(255),
         base_api_url TEXT DEFAULT NULL,
         active BOOLEAN DEFAULT 1,
         sales_email VARCHAR(255),
@@ -1882,6 +1984,7 @@ function create_tables() {
         service_cost_provider DECIMAL(10,2) NOT NULL,
         service_cost_main DECIMAL(10,2) NOT NULL,
         max_spots SMALLINT UNSIGNED NOT NULL DEFAULT 8,
+        service_description VARCHAR(255),
         PRIMARY KEY (service_id),
         FOREIGN KEY (provider_id) REFERENCES $provider_sites_table(provider_id) ON DELETE CASCADE
     ) $charset_collate;";
@@ -1968,6 +2071,9 @@ function provider_manager_page() {
         $online= isset($_POST['online']) ? 1 : 0;        
         $base_api_url = $online ? esc_url_raw($_POST['base_api_url']) : null;
         $paystack_subaccount = sanitize_text_field($_POST['paystack_subaccount']);
+
+        $paystack_subaccount_test = sanitize_text_field($_POST['paystack_subaccount_test']);
+
         $sales_email = sanitize_email($_POST['sales_email']);
         $api_key = create_api_key();
         $hmac_secret = create_hmac_secret();
@@ -1978,6 +2084,7 @@ function provider_manager_page() {
             'hmac_secret' => $hmac_secret,
             'base_api_url' => $base_api_url,
             'paystack_subaccount' => $paystack_subaccount,
+            'paystack_subaccount_test' => $paystack_subaccount_test,
             'sales_email' => $sales_email,
         ]);
 
@@ -2010,7 +2117,8 @@ function provider_manager_page() {
             <tr><th><label for="provider_name">Provider Name</label></th><td><input name="provider_name" required /></td></tr>
             <tr><th><label for="online">Online</label></th><td><input type="checkbox" name="online" id="online" value="0" /></td></tr>
             <tr><th><label for="base_api_url">Base API url</label></th><td><input name="base_api_url" id="base_api_url" /></td></tr>
-            <tr><th><label for="paystack_subaccount">Paystack Subaccount</label></th><td><input name="paystack_subaccount" required /></td></tr>
+            <tr><th><label for="paystack_subaccount">Paystack Subaccount (Live)</label></th><td><input name="paystack_subaccount" required /></td></tr>
+            <tr><th><label for="paystack_subaccount_test">Paystack Subaccount (Test)</label></th><td><input name="paystack_subaccount_test" required /></td></tr>
             <tr><th><label for="sales_email">Sales Email</label></th><td><input name="sales_email" type="email" required /></td></tr>
         </table>
         <input type="submit" name="add_provider" class="button-primary" value="Add Provider" />
@@ -2020,7 +2128,7 @@ function provider_manager_page() {
         echo '<h2>Registered Providers</h2>';
         echo '<form method="post">';
         echo '<table class="widefat">';
-        echo '<thead><tr><th>ID</th><th>Name</th><th>Base API url</th><th>Sales Email</th><th>Paystack Subaccount</th><th>API Key</th><th>HMAC Secret</th><th>Active</th><th>Actions</th></tr></thead><tbody>';
+        echo '<thead><tr><th>ID</th><th>Name</th><th>Base API url</th><th>Sales Email</th><th>Paystack Subaccount (Live)</th><th>Paystack Subaccount (Test)</th><th>API Key</th><th>HMAC Secret</th><th>Active</th><th>Actions</th></tr></thead><tbody>';
 
         foreach ($providers as $p) {
             $api_key_id = 'api_key_' . $p->provider_id;
@@ -2032,6 +2140,7 @@ function provider_manager_page() {
             echo '<td>' . esc_url($p->base_api_url) . '</td>';
             echo '<td>' . esc_html($p->sales_email) . '</td>';
             echo '<td>' . esc_html($p->paystack_subaccount) . '</td>';
+            echo '<td>' . esc_html($p->paystack_subaccount_test) . '</td>';
 
             echo '<td><span class="key-container">
                     <span id="' . esc_attr($api_key_id) . '" class="key-text" data-value="' . esc_attr($p->api_key) . '" data-visible="false">••••••••••••••••••••••••••••••</span>
@@ -2170,6 +2279,8 @@ function provider_services_manager_page() {
         $service_name = sanitize_text_field($_POST['service_name']);
         $service_cost_provider = floatval($_POST['service_cost']);
         $max_spots = intval($_POST['max_spots']);
+        $service_description = sanitize_text_field($_POST['service_description']);
+        $service_description = substr($service_description, 0, 255);
 
         // Round up to nearest 1 after adding 10%
         $service_cost_main = ceil($service_cost_provider * 1.1);
@@ -2187,7 +2298,8 @@ function provider_services_manager_page() {
                 'service_name'          => $service_name,
                 'service_cost_provider' => $service_cost_provider,
                 'service_cost_main'     => $service_cost_main,
-                'max_spots'             => $max_spots
+                'max_spots'             => $max_spots,
+                'service_description'   => $service_description
             ]);
 
             echo '<div class="updated"><p>Service added.</p></div>';
@@ -2246,7 +2358,13 @@ function provider_services_manager_page() {
     echo '<form method="post" style="margin-bottom: 1em;">';
     echo '<input type="text" name="service_name" placeholder="New Service Name" required> ';
     echo '<input type="number" name="service_cost" placeholder="Cost (Provider)" step="0.01" required> ';
-    echo '<input type="number" name="max_spots" placeholder="Max Spots" required> ';
+    echo '<input type="number" name="max_spots" placeholder="Max Spots" required> <br><br>';
+    echo '<textarea name="service_description" 
+        placeholder="Service Description (255 characters max)" 
+        maxlength="255" 
+        rows="4" 
+        cols="50" 
+        required></textarea> <br>';
     echo '<input type="submit" name="add_service_submit" class="button button-primary" value="Add Service">';
     echo '</form>';
 
@@ -2258,7 +2376,7 @@ function provider_services_manager_page() {
 
     if ($services) {
         echo '<table class="widefat striped">';
-        echo '<thead><tr><th>Service Name</th><th>Provider Cost</th><th>Main Cost</th><th>Max Spots</th><th>Actions</th></tr></thead><tbody>';
+        echo '<thead><tr><th>Service Name</th><th>Provider Cost</th><th>Main Cost</th><th>Max Spots</th><th>Service Description</th><th>Actions</th></tr></thead><tbody>';
 
         foreach ($services as $service) {
             echo '<tr>';
@@ -2266,6 +2384,7 @@ function provider_services_manager_page() {
             echo '<td>R' . esc_html(number_format($service->service_cost_provider, 2)) . '</td>';
             echo '<td>R' . esc_html(number_format($service->service_cost_main, 2)) . '</td>';
             echo '<td>' . esc_html($service->max_spots) . '</td>';
+            echo '<td>' . esc_html($service->service_description) . '</td>';
             echo '<td>';
             echo '<form method="post" style="display:inline-block;margin-right:10px;" onsubmit="return confirm(\'Are you sure you want to delete this service?\');">';
             echo '<input type="hidden" name="delete_service_id" value="' . intval($service->service_id) . '">';
@@ -2716,70 +2835,449 @@ function provider_payments_dashboard_menu() {
 
 function provider_payments_dashboard_page() {
     global $wpdb;
-    $providers_table   = $wpdb->prefix . 'provider_sites';
-    //$sales_table  = $wpdb->prefix . 'sales_records';
+    $sales_table = $wpdb->prefix . 'sale_records';
     $current_user = wp_get_current_user();
-    $username     = $current_user->user_login;
+    $username = $current_user->user_login;
 
-    $provider = $wpdb->get_row($wpdb->prepare(
-        "SELECT * FROM {$providers_table} WHERE provider_name = %s",
+    $earnings_by_service = $wpdb->get_results($wpdb->prepare(
+        "SELECT service_name, SUM(price_provider) AS total_provider_cost
+         FROM {$sales_table} 
+         WHERE provider_name = %s
+         GROUP BY service_name",
         $username
     ));
 
-    if (!$provider) {
-        echo '<div class="notice notice-error"><p>Provider not found.</p></div>';
-        return;
-    }
-    
-    /*$services = $wpdb->get_results($wpdb->prepare(
-        "SELECT DISTINCT service_name FROM {$sales_table} WHERE provider_name = %s",
-        $username
-    ));*/
-
-    //Register Rest Route
-    $rest_url = esc_url_raw(rest_url('pcp/v1/'));
+    $pie_labels = wp_json_encode(array_map(fn($s) => $s->service_name, $earnings_by_service));
+    $pie_values = wp_json_encode(array_map(fn($s) => (float)$s->total_provider_cost, $earnings_by_service));
+    $rest_url = esc_url_raw(rest_url('pcp/v1'));
     $rest_nonce = wp_create_nonce('wp_rest');
-
     ?>
-    <script>
-        const rest_object = {
-            rest_url: "<?= $rest_url ?>",
-            nonce: "<?= $rest_nonce ?>"
-        };
-    </script>
 
-    <div>
-        <canvas id="salesChart"></canvas>
-    </div> 
+    <style>
+    .chart-container {
+        max-width: 700px;
+        margin: 20px auto;
+        display: flex;
+        justify-content: center;
+        flex-direction: column;
+        align-items: center;
+    }
+
+    .chart-inner {
+        width: 100%;
+        max-width: 600px;
+        text-align: center;
+    }
+
+    .chart-inner canvas {
+        display: block;
+        margin: 0 auto;
+        width: 100% !important; /* full width */
+        height: 400px; /* default height for desktop/tablet */
+    }
+
+    @media (max-width: 768px) {
+        .chart-inner canvas {
+            height: 350px; /* smaller on tablets */
+        }
+    }
+
+    @media (max-width: 480px) {
+        .chart-inner canvas {
+            height: 500px; /* taller on mobile so it's readable */
+        }
+    }
+    </style>
+
+    <!-- Pie Chart -->
+    <div class="chart-container">
+        <div class="chart-inner">
+            <label for="chart-select-pie">Chart Type:</label>
+            <select id="chart-select-pie">
+                <option value="pie">Pie</option>
+                <option value="bar">Bar</option>
+            </select>
+            <canvas id="salesPieChart"></canvas>
+        </div>
+    </div>
+
+    <!-- Line/Bar Chart -->
+    <div class="chart-container">
+        <div class="chart-inner">
+            <label for="chart-select-line">Chart Type:</label>
+            <select id="chart-select-line">
+                <option value="line">Line</option>
+                <option value="bar">Bar</option>
+            </select><br>
+
+            <label for="service-select">Service:</label>
+            <select id="service-select">
+                <option value="all">All Services</option>
+                <?php foreach ($earnings_by_service as $s): ?>
+                    <option value="<?= esc_attr($s->service_name) ?>"><?= esc_html($s->service_name) ?></option>
+                <?php endforeach; ?>
+            </select><br>
+
+            <label for="from-date">From:</label>
+            <input type="date" id="from-date"><br>
+
+            <label for="to-date">To:</label>
+            <input type="date" id="to-date"><br>
+
+            <button id="filter-line-chart">Filter</button><br>
+
+            <canvas id="salesLineChart"></canvas>
+        </div>
+    </div>
+
+    <!-- Time-slot Chart -->
+    <div class="chart-container">
+        <div class="chart-inner">
+            <label for="chart-select-time-slot">Chart Type:</label>
+            <select id="chart-select-time-slot">
+                <option value="bar">Bar</option>
+                <option value="pie">Pie</option>
+            </select><br>
+
+            <label for="service-select-time-slot">Service:</label>
+            <select id="service-select-time-slot">
+                <option value="all">All Services</option>
+                <?php foreach ($earnings_by_service as $s): ?>
+                    <option value="<?= esc_attr($s->service_name) ?>"><?= esc_html($s->service_name) ?></option>
+                <?php endforeach; ?>
+            </select><br>
+
+            <canvas id="timeSlotChart"></canvas>
+        </div>
+    </div>
+
+
+
     <script>
-        window.onload = function() {
-            const salesChart = document.getElementById("salesChart");
-            new Chart(salesChart, {
-                type: 'bar',
+    document.addEventListener('DOMContentLoaded', function () {
+        const pieCtx = document.getElementById("salesPieChart");
+        const lineCtx = document.getElementById("salesLineChart");
+        const timeSlotCtx = document.getElementById("timeSlotChart");
+
+        let pieChart;
+
+        function fetchPieChart(chartType)
+        {
+            if(pieChart) pieChart.destroy();
+
+            pieChart = new Chart(pieCtx, {
+                type: chartType,
                 data: {
-                labels: ['Red', 'Blue', 'Yellow', 'Green', 'Purple', 'Orange'],
-                datasets: [{
-                    label: '# of Votes',
-                    data: [12, 19, 3, 5, 2, 3],
-                    borderWidth: 1
-                }]
+                    labels: <?php echo $pie_labels; ?>,
+                    datasets: [{
+                        label: 'Provider Earnings',
+                        data: <?php echo $pie_values; ?>,
+                        backgroundColor: [
+                            'rgba(255, 99, 132, 0.6)',
+                            'rgba(54, 162, 235, 0.6)',
+                            'rgba(255, 206, 86, 0.6)',
+                            'rgba(75, 192, 192, 0.6)',
+                            'rgba(153, 102, 255, 0.6)',
+                            'rgba(255, 159, 64, 0.6)'
+                        ],
+                        borderWidth: 1
+                    }]
                 },
                 options: {
-                scales: {
-                    y: {
-                    beginAtZero: true
+                    responsive: true,
+                    plugins: {
+                        legend: { 
+                            display: chartType !== 'bar',
+                            position: 'right' 
+                        },
+                        title: { display: true, text: 'Earnings by Service', font: { size: 24, weight: 'bold' } }
                     }
                 }
-                }
+            });
+        }       
+
+        let lineChart;
+
+        function fetchLineChartData(service, from, to, chartType) {
+            fetch("<?php echo $rest_url . '/provider/sales_history'; ?>", {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-WP-Nonce': '<?php echo $rest_nonce; ?>'
+                },
+                body: JSON.stringify({ service, from, to })
+            })
+            .then(res => res.json())
+            .then(data => {
+                const dateMap = {};
+                data.forEach(item => {
+                    if(!dateMap[item.created_at]) dateMap[item.created_at] = 0;
+                    dateMap[item.created_at] += item.total_provider_cost;
+                });
+
+                const dates = Object.keys(dateMap).sort();
+                const values = dates.map(d => dateMap[d]);
+
+                if(lineChart) lineChart.destroy();
+
+                lineChart = new Chart(lineCtx, {
+                    type: chartType,
+                    data: {
+                        labels: dates,
+                        datasets: [{
+                            label: 'Earnings Over Time',
+                            data: values,
+                            borderColor: 'rgba(0, 100, 167, 1)',
+                            backgroundColor: 'rgba(55, 174, 253, 0.7)',
+                            fill: true,
+                            tension: 0.5
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: {
+                            legend: { position: 'top' },
+                            title: { display: true, text: 'Earnings Over Time', font: { size: 20, weight: 'bold' } }
+                        },
+                        scales: {
+                            x: { title: { display: true, text: 'Date' } },
+                            y: { title: { display: true, text: 'Earnings' } }
+                        }
+                    }
+                });
             });
         }
+        
+        let timeSlotChart;
+        function fetchTimeSlotChart(service, chartType){
+            fetch("<?php echo $rest_url . '/provider/by_time_slot'; ?>", {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-WP-Nonce': '<?php echo $rest_nonce; ?>'
+                },
+                body: JSON.stringify({ service })
+            })
+            .then(res => res.json())
+            .then(data => {
+                const slotMap = {};
+                data.forEach(item => {
+                    const slot = item.time_range;  // no date, only time range
+                    if (!slotMap[slot]) slotMap[slot] = 0;
+                    slotMap[slot] += item.total_provider_cost;
+                });
 
+                const slots = Object.keys(slotMap);
+                const values = slots.map(s => slotMap[s]);
+
+                            const colors = [
+                                'rgba(255, 99, 132, 0.6)',
+                                'rgba(54, 162, 235, 0.6)',
+                                'rgba(255, 206, 86, 0.6)',
+                                'rgba(75, 192, 192, 0.6)',
+                                'rgba(153, 102, 255, 0.6)',
+                                'rgba(255, 159, 64, 0.6)',
+                                'rgba(201, 203, 207, 0.6)',
+                                'rgba(100, 149, 237, 0.6)',
+                                'rgba(60, 179, 113, 0.6)',
+                            ];
+
+                            const datasetColors = slots.map((_, i) => colors[i % colors.length]);
+
+                if (timeSlotChart) timeSlotChart.destroy();
+
+                timeSlotChart = new Chart(timeSlotCtx, {
+                    type: chartType,
+                    data: {
+                        labels: slots,
+                        datasets: [{
+                            label: 'Earnings By Time-slot',
+                            data: values,
+                            backgroundColor: datasetColors,
+                            borderColor: datasetColors.map(c => c.replace('0.6', '1')),
+                            fill: true,
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        plugins: {
+                            legend: { position: 'top' },
+                            title: { display: true, text: 'Earnings By Time-slot', font: { size: 20, weight: 'bold' } }
+                        },
+                        scales: {
+                            x: { title: { display: true, text: 'Time-slot' } },
+                            y: { title: { display: true, text: 'Earnings' } }
+                        }
+                    }
+                });
+            });
+
+        }
+
+        fetchPieChart('pie');
+        fetchLineChartData('all', null, null, 'line');
+        fetchTimeSlotChart('all', 'bar')
+
+        document.getElementById('filter-line-chart').addEventListener('click', function() {
+            const service = document.getElementById('service-select').value;
+            const from = document.getElementById('from-date').value || null;
+            const to = document.getElementById('to-date').value || null;
+            const chart = document.getElementById('chart-select-line').value;
+            fetchLineChartData(service, from, to, chart);
+        });
+
+        document.getElementById('chart-select-line').addEventListener('change', function() {
+            const service = document.getElementById('service-select').value;
+            const from = document.getElementById('from-date').value || null;
+            const to = document.getElementById('to-date').value || null;
+            const chart = document.getElementById('chart-select-line').value;
+            fetchLineChartData(service, from, to, chart);
+        });
+
+        document.getElementById('chart-select-pie').addEventListener("change", () => {
+            const chart = document.getElementById('chart-select-pie').value;
+            fetchPieChart(chart);
+        });
+
+        document.getElementById('chart-select-time-slot').addEventListener("change", () => {
+            const service = document.getElementById('service-select-time-slot').value;
+            const chart = document.getElementById('chart-select-time-slot').value;
+            fetchTimeSlotChart(service, chart)
+        });
+
+        document.getElementById('service-select-time-slot').addEventListener("change", () => {
+            const service = document.getElementById('service-select-time-slot').value;
+            const chart = document.getElementById('chart-select-time-slot').value;
+            fetchTimeSlotChart(service, chart)
+        });
+
+
+    });
     </script>
-    <?php
 
+    <?php
 }
 
+add_action('rest_api_init', function () {
+    register_rest_route('pcp/v1', '/provider/sales_history', [
+        'methods' => 'POST',
+        'callback' => 'provider_sales_history_rest',
+        'permission_callback' => function ($request) {
+            $nonce = $request->get_header('X-WP-Nonce');
+            if (!wp_verify_nonce($nonce, 'wp_rest')) {
+                return false;
+            }
+            $user = wp_get_current_user();
+            return $user->exists();
+        },
+    ]);
+});
 
+function provider_sales_history_rest(WP_REST_Request $request) {
+    global $wpdb;
+    $sales_table = $wpdb->prefix . 'sale_records';
+    $current_user = wp_get_current_user();
+    $username = $current_user->user_login;
+
+    // Get filter params
+    $service = $request->get_param('service') ?? 'all';
+    $from = $request->get_param('from') ?? null;
+    $to = $request->get_param('to') ?? null;
+
+    // Base query
+    $query = "SELECT service_name, DATE(created_at) AS created_at, SUM(price_provider) AS total_provider_cost
+              FROM {$sales_table}
+              WHERE provider_name = %s";
+    $params = [$username];
+
+    // Add service filter
+    if($service !== 'all') {
+        $query .= " AND service_name = %s";
+        $params[] = $service;
+    }
+
+    // Add date filters
+    if($from) {
+        $query .= " AND created_at >= %s";
+        $params[] = $from;
+    }
+    if($to) {
+        $query .= " AND created_at <= %s";
+        $params[] = $to;
+    }
+
+    $query .= " GROUP BY service_name, created_at ORDER BY created_at ASC";
+
+    $results = $wpdb->get_results($wpdb->prepare($query, ...$params));
+
+    // Ensure float type for JS
+    foreach($results as $r) {
+        $r->total_provider_cost = (float)$r->total_provider_cost;
+    }
+
+    return rest_ensure_response($results);
+}
+
+add_action('rest_api_init', function () {
+    register_rest_route('pcp/v1', '/provider/by_time_slot', [
+        'methods' => 'POST',
+        'callback' => 'by_time_slot_rest',
+        'permission_callback' => function ($request) {
+            $nonce = $request->get_header('X-WP-Nonce');
+            if (!wp_verify_nonce($nonce, 'wp_rest')) {
+                return false;
+            }
+            $user = wp_get_current_user();
+            return $user->exists();
+        },
+    ]);
+});
+
+function by_time_slot_rest(WP_REST_Request $request) {
+    global $wpdb;
+    $sales_table = $wpdb->prefix . 'sale_records';
+    $current_user = wp_get_current_user();
+    $username = $current_user->user_login;
+
+    $service = $request->get_param('service') ?? 'all';
+
+    // Base query
+    $query = "SELECT service_name, booking_time_slot AS start_time, booking_time_slot_length_min AS length_min, price_provider
+              FROM {$sales_table}
+              WHERE provider_name = %s";
+    $params = [$username];
+
+    if ($service !== 'all') {
+        $query .= " AND service_name = %s";
+        $params[] = $service;
+    }
+
+    $results = $wpdb->get_results($wpdb->prepare($query, ...$params));
+
+    $slot_map = [];
+    foreach ($results as $r) {
+        $start = $r->start_time;
+        $end_time_sec = strtotime($r->start_time) + ($r->length_min * 60);
+        $end = date('H:i', $end_time_sec);
+        $start = date('H:i', strtotime($r->start_time));
+        $time_range = "$start - $end";
+
+        if (!isset($slot_map[$time_range])) $slot_map[$time_range] = 0;
+        $slot_map[$time_range] += (float)$r->price_provider;
+    }
+
+    // Convert to array for JSON
+    $output = [];
+    foreach ($slot_map as $range => $total) {
+        $output[] = [
+            'time_range' => $range,
+            'total_provider_cost' => $total,
+        ];
+    }
+
+    return rest_ensure_response($output);
+}
 
 
 
@@ -2808,10 +3306,16 @@ function provider_setup_all_spots_service_availability(WP_REST_Request $request)
     $body_data = $data['body_data'];
     $provider_row = $data['provider_row'];
     $provider_id = $provider_row->provider_id;
-    $service_name = $body_data['service_name'] ?? null;
-    if(!isset($service_name))
-    {
-        return new WP_REST_Response(['message' => 'service_name not found (sent incorretly?)'], 404);
+    $service_name = null;
+    if (is_array($body_data) && isset($body_data['service_name'])) {
+        $service_name = sanitize_text_field($body_data['service_name']);
+    }
+
+    if (empty($service_name)) {
+        return new WP_REST_Response(
+            ['message' => 'service_name missing or invalid'],
+            400
+        );
     }
     $service_id = $wpdb->get_var(
         $wpdb->prepare("SELECT service_id FROM {$wpdb->prefix}services WHERE provider_id = %d AND service_name = %s", $provider_id, $service_name)
@@ -2856,6 +3360,7 @@ add_action('rest_api_init', function () {
 //For provider to UPDATE a spot that was booked/pending (Does NOT add new spots)
 function provider_update_service_spots_availability(WP_REST_Request $request){
     global $wpdb;
+    $availability_table = $wpdb->prefix . 'availability';
 
     $data = verify_and_decrypt_response($request);
 
@@ -2866,10 +3371,16 @@ function provider_update_service_spots_availability(WP_REST_Request $request){
     $body_data = $data['body_data'];
     $provider_row = $data['provider_row'];
     $provider_id = $provider_row->provider_id;
-    $service_name = $body_data['service_name'] ?? null;
-    if(!isset($service_name))
-    {
-        return new WP_REST_Response(['message' => 'service_name not found (sent incorretly?)'], 404);
+    $service_name = null;
+    if (is_array($body_data) && isset($body_data['service_name'])) {
+        $service_name = sanitize_text_field($body_data['service_name']);
+    }
+
+    if (empty($service_name)) {
+        return new WP_REST_Response(
+            ['message' => 'service_name missing or invalid'],
+            400
+        );
     }
     $service_id = $wpdb->get_var(
         $wpdb->prepare("SELECT service_id FROM {$wpdb->prefix}services WHERE provider_id = %d AND service_name = %s", $provider_id, $service_name)
@@ -2881,8 +3392,10 @@ function provider_update_service_spots_availability(WP_REST_Request $request){
     $dates_availability = $body_data['dates_availability'] ?? null;
     if(!isset($dates_availability) || !is_array($dates_availability))
     {
-        return new WP_REST_Response(['message' => 'dates_availability not found or not an array (sent incorretly?)'], 404);
+        return new WP_REST_Response(['message' => 'dates_availability not found or not an array (sent incorrectly?)'], 400);
     }
+
+    $updated_count = 0;
 
     foreach ($dates_availability as $entry) {
         if (!isset($entry['id'])) {
@@ -2894,6 +3407,11 @@ function provider_update_service_spots_availability(WP_REST_Request $request){
         }
         $status = sanitize_text_field($entry['status'] ?? null);
 
+        $allowed_status = ['a', 'p', 'b'];
+        if (!in_array($status, $allowed_status, true)) {
+            return new WP_REST_Response(['message' => 'Invalid status'], 400);
+        }
+
         $updated_rows = $wpdb->query(
             $wpdb->prepare("
                 UPDATE $availability_table
@@ -2901,9 +3419,16 @@ function provider_update_service_spots_availability(WP_REST_Request $request){
                 WHERE provider_db_id = %d AND service_id = %d
             ", $status, $provider_db_id, $service_id)
         );
+
+        if ($updated_rows !== false) {
+            $updated_count += $updated_rows;
+        }
     }
 
-    return new WP_REST_Response(['message' => 'Availability slots inserted successfully'], 201);
+    return new WP_REST_Response(
+        ['message' => "Updated $updated_count availability slot(s) successfully"],
+        200
+    );
 }
 
 add_action('rest_api_init', function () {
@@ -2917,6 +3442,8 @@ add_action('rest_api_init', function () {
 //For provider to get all the available spots for a service
 function provider_get_all_service_spots_availability(WP_REST_Request $request){
     $data = verify_and_decrypt_response($request);
+    global $wpdb;
+    $availability_table = $wpdb->prefix . 'availability';
 
     if ($data instanceof WP_REST_Response) {
         return $data;
@@ -2925,10 +3452,15 @@ function provider_get_all_service_spots_availability(WP_REST_Request $request){
     $body_data = $data['body_data'];
     $provider_row = $data['provider_row'];
     $provider_id = $provider_row->provider_id;
-    $service_name = $body_data['service_name'] ?? null;
-    if(!isset($service_name))
-    {
-        return new WP_REST_Response(['message' => 'service_name not found (sent incorretly?)'], 404);
+    $service_name = null;
+    if (is_array($body_data) && isset($body_data['service_name'])) {
+        $service_name = sanitize_text_field($body_data['service_name']);
+    }
+    if (empty($service_name)) {
+        return new WP_REST_Response(
+            ['message' => 'service_name missing or invalid'],
+            400
+        );
     }
     $service_id = $wpdb->get_var(
         $wpdb->prepare("SELECT service_id FROM {$wpdb->prefix}services WHERE provider_id = %d AND service_name = %s", $provider_id, $service_name)
@@ -2953,6 +3485,87 @@ function provider_get_all_service_spots_availability(WP_REST_Request $request){
     ];
 
     return new WP_REST_Response($availability, 200);
+}
+
+add_action('rest_api_init', function () {
+    register_rest_route('api/v1', '/provider_delete_service_availability_time_slot', [
+        'methods' => 'DELETE',
+        'callback' => 'provider_delete_service_availability_time_slot',
+        'permission_callback' => '__return_true', // Custom auth will be handled in function
+    ]);
+});
+
+function provider_delete_service_availability_time_slot(WP_REST_Request $request){
+    $data = verify_and_decrypt_response($request);
+    global $wpdb;
+    $availability_table = $wpdb->prefix . 'availability';
+
+    if ($data instanceof WP_REST_Response) {
+        return $data;
+    }
+
+    $body_data = $data['body_data'];
+    $provider_row = $data['provider_row'];
+    $provider_id = $provider_row->provider_id;    
+    $service_name = null;
+    if (is_array($body_data) && isset($body_data['service_name'])) {
+        $service_name = sanitize_text_field($body_data['service_name']);
+    }
+
+    if (empty($service_name)) {
+        return new WP_REST_Response(
+            ['message' => 'service_name missing or invalid'],
+            400
+        );
+    }
+    $time_slot = null;
+    if (is_array($body_data) && isset($body_data['time_slot'])) {
+        $time_slot = sanitize_text_field($body_data['time_slot']);
+    }
+    if (empty($time_slot)) {
+        return new WP_REST_Response(
+            ['message' => 'time_slot missing or invalid'],
+            400
+        );
+    }
+    $service_id = $wpdb->get_var(
+        $wpdb->prepare("SELECT service_id FROM {$wpdb->prefix}services WHERE provider_id = %d AND service_name = %s", $provider_id, $service_name)
+    );
+
+    if(empty($service_id))
+    {
+        return new WP_REST_Response(['message' => 'No service found in DB '], 404);
+    }
+        
+        $has_bookings = $wpdb->get_var( $wpdb->prepare(
+            "SELECT COUNT(*) FROM $availability_table WHERE service_id = %d AND time_slot = %s AND status IN ('p','b')",
+            $service_id, $time_slot
+        ) );
+
+        if ($has_bookings) {
+           return new WP_REST_Response(
+                ['message' => "Unable to delete time slot(s) as there are bookings"], 403
+            );
+        } else {            
+            $deleted_rows = $wpdb->query(
+                $wpdb->prepare(
+                    "DELETE FROM $availability_table WHERE service_id = %d AND time_slot = %s",
+                    $service_id,
+                    $time_slot
+                )
+            );
+
+            if ($deleted_rows === false) {
+                return new WP_REST_Response(['message' => 'Database deletion failed'], 500);
+            }                
+            else if ($deleted_rows === 0) {
+                return new WP_REST_Response(['message' => 'No matching time slot found'], 404);
+            }
+        } 
+
+        return new WP_REST_Response(
+            ['message' => "Deleted $deleted_rows time slot(s) successfully"], 200
+        );
 }
 
 //==================
@@ -3140,7 +3753,8 @@ function create_and_send_email($to, $session_id){
             a.service_id,
             s.service_name,
             s.provider_id,
-            p.provider_name
+            p.provider_name,
+            p.sales_email
         FROM {$wpdb->prefix}availability a
         INNER JOIN {$wpdb->prefix}services s ON a.service_id = s.service_id
         INNER JOIN {$wpdb->prefix}provider_sites p ON s.provider_id = p.provider_id
@@ -3169,12 +3783,13 @@ function create_and_send_email($to, $session_id){
 function generate_html_email_from_availability($availability_rows, $session_id) {
     $grouped = [];
 
-    // Group by provider and then service
+    $qr_url = home_url('/ticket-verification/?reference=' . urlencode($session_id));
+
     foreach ($availability_rows as $row) {
         $provider = $row['provider_name'];
         $service = $row['service_name'];
+        $provider_email = $row['sales_email'];
 
-        // Calculate to_time
         $start_time = DateTime::createFromFormat('H:i:s', $row['time_slot']);
         $from_time = $start_time->format('H:i');
         $start_time->modify("+" . $row['time_slot_length_min'] . " minutes");
@@ -3187,39 +3802,50 @@ function generate_html_email_from_availability($availability_rows, $session_id) 
         ];
     }
 
-    // Start HTML output
-    $html = '<div style="font-family: Arial, sans-serif;">';
+
+    $html  = '<div style="font-family: Arial, sans-serif;">';
     $html .= '<h2 style="color:#2c3e50;">Tickets</h2>';
-    $html .= '<p style="font-size:14px;color:#555;"><strong>Reference code:</strong> ' . esc_html($session_id) . '</p>';
+    $html .= '<p style="font-size:14px;color:#555;"><strong>Reference number:</strong> ' . esc_html($session_id) . '</p>';
 
     foreach ($grouped as $provider_name => $services) {
-        $provider_name = esc_html($provider_name);
-        $html .= "<h3 style='color:#2980b9;margin-bottom:5px;'>$provider_name</h3>";
+        $html .= "<h3 style='color:#2980b9; margin-bottom:5px;'>" . esc_html($provider_name) . "</h3>";         
 
         foreach ($services as $service_name => $tickets) {
-            $service_name = esc_html($service_name);
-            $html .= "<h4 style='color:#27ae60;margin-left:20px;margin-bottom:3px;'>$service_name</h4>";
-            $html .= "<ul style='margin-left:40px;'>";
+            $html .= "<h4 style='color:#27ae60; margin-bottom:3px;'>" . esc_html($service_name) . "</h4>";
+            $html .= "<ul style='list-style-position: inside; padding-left:0; margin:10px auto; display:inline-block; text-align:left;'>";
 
             foreach ($tickets as $ticket) {
                 $ticket_date = esc_html($ticket['available_date']);
                 $ticket_from = esc_html($ticket['from_time']);
-                $ticket_to = esc_html($ticket['to_time']);
+                $ticket_to   = esc_html($ticket['to_time']);
 
-                $html .= "<li><strong>Date:</strong> {$ticket_date} | 
-                        <strong>Time:</strong> {$ticket_from} - {$ticket_to}</li>";
+                $html .= "<li><strong>Date:</strong> {$ticket_date} | <strong>Time:</strong> {$ticket_from} - {$ticket_to}</li>";
             }
 
             $html .= "</ul>";
         }
+        $html .= "<h4 style='color:#2980b9; margin-bottom:5px;'>" . "Provider Email: " .esc_html($provider_email) . "</h3>";
     }
 
-    $html .= '<div style="font-size:12px;color:#888;margin-top:20px;">Disclaimer: There is a non-refundable admin fee included in your payment - For cancellations and refunds of activities, please contact your chosen service provider directly.</div>';
+    $html .= "
+        <p><a href='$qr_url'>Click here</a> to view your tickets.</p>        
+    ";  
+
+        $upload_dir = wp_upload_dir();
+    $logo_url = $upload_dir['baseurl'] . '/2025/09/cropped-cropped-logo-latest-transparent-bg-scaled-1.jpg';
+
+    $html .= '<img src="' . esc_url($logo_url) . '" alt="Logo" style="max-width:200px; margin-top:20px;" />';
+
+    $html .= "<div style='font-size:12px;color:#888;margin-top:20px;'>
+            Disclaimer: There is a non-refundable admin fee included in your payment - For cancellations and refunds of activities, please contact your chosen service provider directly.
+        </div>";
+
+
     $html .= '</div>';
 
     return $html;
-
 }
+
 
 function create_and_send_provider_emails($session_id){
     global $wpdb;
@@ -3304,7 +3930,7 @@ function generate_html_email_for_provider($availability_rows, $session_id) {
     // Start HTML output
     $html = '<html><body style="font-family: Arial, sans-serif;">';
     $html .= '<h2 style="color:#2c3e50;">Tickets Summary</h2>';
-    $html .= '<p style="font-size:14px;color:#555;"><strong>Reference Code:</strong> ' . esc_html($session_id) . '</p>';
+    $html .= '<p style="font-size:14px;color:#555;"><strong>Reference number:</strong> ' . esc_html($session_id) . '</p>';
 
     foreach ($grouped as $service_name => $tickets) {
         $html .= "<h4 style='color:#27ae60;margin-left:20px;'>Service: " . esc_html($service_name) . "</h4>";
@@ -3341,7 +3967,8 @@ function update_sales_record($session_id){
     $provider_sites_table = $wpdb->prefix . 'provider_sites';
     $sale_records_table = $wpdb->prefix . 'sale_records';
 
-    $sale_data = $wpdb->get_row( $wpdb->prepare(
+    // Fetch all rows for this session   
+    $sale_data_rows = $wpdb->get_results( $wpdb->prepare(
         "SELECT 
             p.provider_name,
             s.service_name,
@@ -3357,21 +3984,27 @@ function update_sales_record($session_id){
         $session_id
     ) );
 
-    if ($sale_data) {
-        $wpdb->insert(
-            $sale_records_table,
-            [
-                'provider_name'               => $sale_data->provider_name,
-                'service_name'                => $sale_data->service_name,
-                'booking_for_date'            => $sale_data->available_date,
-                'booking_time_slot'           => $sale_data->time_slot,
-                'booking_time_slot_length_min'=> $sale_data->time_slot_length_min,
-                'price_main'                  => $sale_data->service_cost_main,
-                'price_provider'              => $sale_data->service_cost_provider,
-            ]
-        );
+    if (!empty($sale_data_rows)) {
+        foreach ($sale_data_rows as $sale_data) {
+            $wpdb->insert(
+                $sale_records_table,
+                [
+                    'provider_name'                => $sale_data->provider_name,
+                    'service_name'                 => $sale_data->service_name,
+                    'booking_for_date'             => $sale_data->available_date,
+                    'booking_time_slot'            => $sale_data->time_slot,
+                    'booking_time_slot_length_min' => $sale_data->time_slot_length_min,
+                    'price_main'                   => $sale_data->service_cost_main,
+                    'price_provider'               => $sale_data->service_cost_provider,
+                ],
+                [
+                    '%s', '%s', '%s', '%s', '%d', '%f', '%f'
+                ]
+            );
+        }
     }
 }
+
 
 
 

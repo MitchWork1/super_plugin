@@ -16,6 +16,8 @@ document.addEventListener("DOMContentLoaded", function () {
   const timerDoneUI = document.getElementById("timer-done-ui");
   const callbackUi = document.getElementById("callback-ui");
   const callbackUiOKBtn = document.getElementById("callback-ui-ok");
+  const serviceDescription = document.getElementById("service_description");
+  const serviceDescriptionDiv = document.getElementById("service_description_div");
   let countdownTime = 600;
   let timerInterval = null;
   const timerDisplay = document.getElementById("timer-display");
@@ -53,7 +55,62 @@ document.addEventListener("DOMContentLoaded", function () {
 
   if (provider_id) {
     providerSelect.value = provider_id;
-    providerSelect.dispatchEvent(new Event("change"));
+    fetch_services_info(provider_id);
+    window.history.replaceState({}, document.title, window.location.pathname);
+  }
+
+  function fetch_services_info($provider_id){
+    fetch(
+      `${rest_object.rest_url}services?provider=${encodeURIComponent(
+        $provider_id
+      )}`,
+      {
+        method: "GET",
+        headers: {
+          "X-WP-Nonce": rest_object.nonce,
+        },
+      }
+    )
+      .then((res) => res.json())
+      .then((services) => {
+        $services_info = services;
+        serviceSelect.disabled = false;
+        serviceSelect.innerHTML =
+          '<option value="">-- Select Service --</option>';
+        services.forEach((service) => {
+          const option = document.createElement("option");
+          option.value = service.service_id;
+          option.textContent =
+            service.service_name + " - R" + service.service_cost_main;
+          serviceSelect.appendChild(option);
+        });
+        if (services.length > 0) {
+          serviceSelect.value = services[0].service_id;
+          serviceSelect.dispatchEvent(new Event("change"));
+              if((services[0].service_description) != null)
+    {
+          if(services[0].service_description.length > 0)
+          {
+            serviceDescriptionDiv.style.display = "block";
+            serviceDescription.textContent = services[0].service_description;
+          }
+          else
+        {
+          serviceDescriptionDiv.style.display = "none";
+        }
+        }
+        else
+        {
+          serviceDescriptionDiv.style.display = "none";
+        }
+          
+        }
+      })
+      .catch((error) => {
+        console.error("Error fetching services:", error);
+        serviceSelect.innerHTML =
+        '<option value="">Error loading services</option>';
+      });
   }
 
   if(reference)
@@ -673,6 +730,9 @@ const totalCost = Array.from(allCostTds)
     serviceSelect.disabled = true;
     generateCalendar(currentYear, currentMonth, {}); // clear calendar
 
+    serviceDescriptionDiv.style.display = "none";
+    serviceDescription.textContent = "";
+
     if (!provider) {
       serviceSelect.innerHTML =
         '<option value="">-- Select Provider First --</option>';
@@ -681,47 +741,29 @@ const totalCost = Array.from(allCostTds)
 
     serviceSelect.innerHTML = '<option value="">Loading services...</option>';
 
-    fetch(
-      `${rest_object.rest_url}services?provider=${encodeURIComponent(
-        provider
-      )}`,
-      {
-        method: "GET",
-        headers: {
-          "X-WP-Nonce": rest_object.nonce, // optional if you secure the endpoint
-        },
-      }
-    )
-      .then((res) => res.json())
-      .then((services) => {
-        $services_info = services;
-        serviceSelect.disabled = false;
-        serviceSelect.innerHTML =
-          '<option value="">-- Select Service --</option>';
-        services.forEach((service) => {
-          const option = document.createElement("option");
-          option.value = service.service_id;
-          option.textContent =
-            service.service_name + " - R" + service.service_cost_main;
-          serviceSelect.appendChild(option);
-        });
-        if (services.length > 0) {
-          serviceSelect.value = services[0].service_id;
-          serviceSelect.dispatchEvent(new Event("change"));
-        }
-      })
-      .catch((error) => {
-        console.error("Error fetching services:", error);
-        serviceSelect.innerHTML =
-        '<option value="">Error loading services</option>';
-      });
-  });
+    fetch_services_info(provider);});
 
   serviceSelect.addEventListener("change", () => {
     const service = serviceSelect.value;
     if (!service) {
       generateCalendar(currentYear, currentMonth, {});
       return;
+    }
+    const selectedService = $services_info.find(
+      (s) => s.service_id == service
+    );
+
+    if (selectedService && selectedService.service_description) {
+      if (selectedService.service_description.length > 0) {
+        serviceDescriptionDiv.style.display = "block";
+        serviceDescription.textContent = selectedService.service_description;
+      } else {
+        serviceDescriptionDiv.style.display = "none";
+        serviceDescription.textContent = "";
+      }
+    } else {
+      serviceDescriptionDiv.style.display = "none";
+      serviceDescription.textContent = "";
     }
 
     fetch(
@@ -876,18 +918,17 @@ function extendBookingHold(availabilityId, extraMinutes = 5) {
     return `${monthNames[date.getMonth()]} ${day}${suffix}`;
   }
 
-  async function generateSessionId() {
+  async function generateSessionId() {    
     const response = await fetch(rest_object.rest_url + "generate_session_id", {
       method: "POST",
       headers: {
-        "X-WP-Nonce": rest_object.nonce, // send nonce in header for security if needed
+        "X-WP-Nonce": rest_object.nonce,
       },
     });
 
     const data = await response.json();
 
     if (data.success) {
-      console.log("Generated session ID:", data.data.session_id);
       sessionId = data.data.session_id;
     } else {
       console.error("Failed to get session ID:", data.message || data);

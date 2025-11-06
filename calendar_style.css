@@ -8,7 +8,18 @@
   border: 1px solid #ccc;
   box-shadow: 0 0 8px rgba(0,0,0,0.1);
   user-select: none;
+  border: #0099ff;
 }
+
+#service_description_header {
+  margin: 0px;
+  padding: 0px;
+}
+
+#service_description {
+  margin-bottom: 1em;
+}
+
 
 .selection-rows {
     display: flex;    
@@ -63,8 +74,8 @@
 }
 
 .day-cell.today {
-  background-color: #fff9e6;
-  border: 1px solid #ffd700;
+  background-color: #e6feff;
+  border: 1px solid #00BCB9;
 }
 
 .day-cell.empty {
