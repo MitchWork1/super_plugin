@@ -41,10 +41,10 @@ document.addEventListener("DOMContentLoaded", function () {
     }
   }
 
-  // Initial run
+
   updateWeekdays();
 
-  // Update on window resize
+
   window.addEventListener("resize", updateWeekdays);
 
 
@@ -191,13 +191,13 @@ document.addEventListener("DOMContentLoaded", function () {
   });
 
   cancelBtn.addEventListener("click", function () {
-    clientModal.style.display = "none"; // close modal
+    clientModal.style.display = "none";
     clientModalOpen = false;
   });
 
   checkoutButton.addEventListener("click", function (e) {
     e.preventDefault();
-    //Customer enter details
+
     clientModal.style.display = "flex";
     clientModalOpen = true;
   });
@@ -267,7 +267,7 @@ window.addEventListener("pagehide", releaseSpots);
       {
         method: "GET",
         headers: {
-          "X-WP-Nonce": rest_object.nonce, // Optional if permission_callback requires nonce
+          "X-WP-Nonce": rest_object.nonce, 
         },
       }
     )
@@ -561,7 +561,7 @@ window.addEventListener("pagehide", releaseSpots);
                           if (data.success) {
                             row_to_delete.remove();
 
-                            // Recalculate total cost
+                            
                             const allCostTds = document.querySelectorAll(
                               "#booking_summary table.booking-table tbody td:nth-child(3)"
                             );
@@ -571,14 +571,14 @@ window.addEventListener("pagehide", releaseSpots);
                               )
                               .reduce((acc, val) => acc + val, 0);
 
-                            // Update total display
+                            
                             const totalAmountEl =
                               document.querySelector(".total-amount");
                             totalAmountEl.textContent = `R${totalCost.toFixed(
                               2
                             )}`;
 
-                            // Hide total and summary if no bookings left
+                            
                             if (allCostTds.length === 0) {
                               document.getElementById(
                                 "booking_total"
@@ -588,11 +588,11 @@ window.addEventListener("pagehide", releaseSpots);
                               ).style.display = "none";
                             }
 
-                            // Remove empty service section
+                            
                             if (tbody.children.length === 0) {
                               serviceSection.remove();
 
-                              // Remove provider section if no more services
+                              
                               const remainingServices =
                                 providerSection.querySelectorAll(
                                   ".service-section"
@@ -650,12 +650,12 @@ window.addEventListener("pagehide", releaseSpots);
                       document.getElementById("booking_total");
                     bookingTotalDiv.style.display = "block";
 
-                    // Get all cost cells in all booking tables
+                    
                     const allCostTds = document.querySelectorAll(
                       "#booking_summary table.booking-table tbody td:nth-child(3)"
                     );
 
-                    // Sum all costs
+                    
                     const totalCost = Array.from(allCostTds)
                       .map((td) => parseFloat(td.textContent.replace("R", "")))
                       .reduce((acc, val) => acc + val, 0);
@@ -694,7 +694,7 @@ window.addEventListener("pagehide", releaseSpots);
   btn.style.pointerEvents = "auto";
   btn.style.backgroundColor = "#4caf50";
 
-  // Recalculate total cost and toggle booking summary display again
+
   const allCostTds = document.querySelectorAll(
     "#booking_summary table.booking-table tbody td:nth-child(3)"
   );
@@ -728,7 +728,7 @@ const totalCost = Array.from(allCostTds)
     const provider = providerSelect.value;
     serviceSelect.innerHTML = "";
     serviceSelect.disabled = true;
-    generateCalendar(currentYear, currentMonth, {}); // clear calendar
+    generateCalendar(currentYear, currentMonth, {}); 
 
     serviceDescriptionDiv.style.display = "none";
     serviceDescription.textContent = "";
@@ -773,7 +773,7 @@ const totalCost = Array.from(allCostTds)
       {
         method: "GET",
         headers: {
-          "X-WP-Nonce": rest_object.nonce, // Optional if permission_callback requires nonce
+          "X-WP-Nonce": rest_object.nonce, 
         },
       }
     )
@@ -888,7 +888,7 @@ function extendBookingHold(availabilityId, extraMinutes = 5) {
 
   function formatDate(hybridDate) {
     const [yy, mm, dd] = hybridDate.split("-").map(Number);
-    const date = new Date(2000 + yy, mm - 1, dd); // Add 2000 to handle years like '25' as 2025
+    const date = new Date(2000 + yy, mm - 1, dd); 
 
     const monthNames = [
       "January",

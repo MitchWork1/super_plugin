@@ -146,7 +146,6 @@
 }
 
 #booking_summary table.booking-table td {
-  /*padding: 6px 12px;*/
   font-size: 1rem;
   white-space: nowrap;
   overflow: hidden;
@@ -228,9 +227,9 @@
 
 .booked-wave {
   animation: wave-text 1s ease-in-out forwards;
-  pointer-events: none; /* disables clicks */
+  pointer-events: none;
   cursor: default;
-  color: black !important; /* dark yellow */
+  color: black !important; 
   background-color: yellow !important;
 }
 
@@ -261,9 +260,9 @@
   }
 }
 
-/* Darker Book Now text */
+
 .book-btn {
-  color: #0b3d0b; /* dark green, for example */
+  color: #0b3d0b; 
   font-weight: 600;
 }
 
@@ -314,14 +313,13 @@
 
 /* --- MOBILE FIXES --- */
 @media (max-width: 900px) {
-  /* Make day cells taller so slots don't squeeze */
+
   .day-cell {
     min-height: auto;
     padding: 2px;
     font-size: 12px;
   }
 
-  /* Stack slots vertically like cards instead of tables */
   .slots-wrapper {
     margin-top: 2px;
     border-width: 1px;
@@ -367,7 +365,7 @@
     font-size: 12px;
   }
 
-  /* Make Book button always visible (no hover dependency) */
+
   .book-btn {
   position: relative !important;
   opacity: 1 !important;
@@ -392,7 +390,7 @@ select {
 }
 
 #callback-ui h3, #callback-ui p {
-    font-size: 18px; /* smaller text on mobile */
+    font-size: 18px; 
 }
 
 }
@@ -408,15 +406,15 @@ select {
 }
 
  #timer-display {
-      position: fixed;     /* Stays in the same place on scroll */
-      top: 10%;           /* Distance from top of window */
-      right: 10px;         /* Distance from right of window */
+      position: fixed; 
+      top: 10%;           
+      right: 10px;         
       background-color: rgba(0,0,0,0.7);
       color: #fff;
       padding: 8px 12px;
       border-radius: 5px;
       font-size: 18px;
-      z-index: 9999;       /* Makes sure it’s on top of other elements */
+      z-index: 9999;       
       font-family: monospace;
   }
 
