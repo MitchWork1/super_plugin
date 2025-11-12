@@ -266,7 +266,7 @@ add_action('rest_api_init', function () {
     register_rest_route('pcp/v1', '/services', [
         'methods' => 'GET',
         'callback' => 'pcp_rest_get_services',
-        'permission_callback' => '__return_true', // public endpoint, no auth needed (adjust if necessary)
+        'permission_callback' => '__return_true', // public endpoint, no auth needed
     ]);
 });
 
@@ -2060,7 +2060,7 @@ function admin_menu_provider() {
 
 function provider_manager_page() {
     global $wpdb;
-    $table = $wpdb->prefix . 'provider_sites'; // match create_tables()
+    $table = $wpdb->prefix . 'provider_sites';
 
     if ($wpdb->get_var("SHOW TABLES LIKE '$table'") != $table) {
         create_tables();
@@ -2487,7 +2487,7 @@ function provider_service_time_slots_page() {
 
         echo '<h2 style="border-bottom: 2px solid black; padding-bottom: 5px; margin-bottom: 10px;">' . esc_html($service_name) . '</h2>';
 
-        // We'll store undo data here to show undo button next to Add button
+        
         $undo_data = '';
 
         if (isset($_POST['add_time_slot_' . $service_id])) {
@@ -2600,7 +2600,6 @@ function provider_service_time_slots_page() {
             }
         }
 
-        // Form with Add and Undo buttons side by side
         echo '<form method="post" onsubmit="return confirm(\'Are you sure you want to add these time slots?\');" style="margin-bottom: 1em;">';
 
         echo '<div style="display: flex; gap: 20px; align-items: center; margin-bottom: 15px;">';
@@ -2621,16 +2620,13 @@ function provider_service_time_slots_page() {
         }
         echo '</div>';
 
-        // Buttons container: Add and Undo side by side
         echo '<div style="display: flex; gap: 10px; align-items: center;">';
 
-        // Add Time Slot button inside main form
+
         echo '<input type="submit" class="button button-primary" name="add_time_slot_' . esc_attr($service_id) . '" value="Add Time Slot">';
 
-        // Close main form
         echo '</form>';
 
-        // Undo button in its own form, inline style for side by side
         if (!empty($undo_data)) {
             echo '<form method="post" style="margin:0; display: inline-block;">';
             echo '<input type="hidden" name="undo_slots" value="' . esc_attr($undo_data) . '">';
@@ -2701,11 +2697,8 @@ function provider_bookings_dashboard_page() {
         ? sanitize_text_field($_POST['to_date'])
         : null;
     $service_filter = isset($_POST['service_id']) ? intval($_POST['service_id']) : 0;
-
-    // New booked_by filter: 0 = All, 1 = Website (booked_by_main=1), 2 = Private (booked_by_main=0)
     $booked_by_filter = isset($_POST['booked_by']) ? intval($_POST['booked_by']) : 0;
 
-    // Build SQL conditions
     $conditions = [];
     $params     = [];
 
@@ -2725,19 +2718,15 @@ function provider_bookings_dashboard_page() {
         $params[]     = $service_filter;
     }
 
-    // Add booked_by filter condition
+
     if ($booked_by_filter === 1) {
-        // Website bookings only
         $conditions[] = "b.booked_by_main = 1";
     } elseif ($booked_by_filter === 2) {
-        // Private bookings only
         $conditions[] = "b.booked_by_main = 0";
     }
-    // 0 = all, no condition added
 
     $where_sql = "WHERE " . implode(" AND ", $conditions);
 
-    // Query bookings
     $query = "
         SELECT 
             a.available_date AS booking_date,
@@ -2757,10 +2746,10 @@ function provider_bookings_dashboard_page() {
 
     $results = $wpdb->get_results($wpdb->prepare($query, $params));
 
-    // Render page
+
     echo '<div class="wrap"><h1>Bookings</h1>';
 
-    // Filter form
+
     echo '<form method="post" style="margin-bottom:20px;">';
     echo '<label>From Date: <input type="date" name="from_date" value="' . esc_attr($from_date) . '"></label> ';
     echo '<label>To Date: <input type="date" name="to_date" value="' . esc_attr($to_date) . '"></label> ';
@@ -2772,7 +2761,7 @@ function provider_bookings_dashboard_page() {
     }
     echo '</select></label> ';
 
-    // Booked By dropdown
+
     echo '<label>Booked By: <select name="booked_by">';
     echo '<option value="0"' . selected($booked_by_filter, 0, false) . '>All</option>';
     echo '<option value="1"' . selected($booked_by_filter, 1, false) . '>Website</option>';
@@ -2782,7 +2771,6 @@ function provider_bookings_dashboard_page() {
     echo '<input type="submit" class="button button-primary" value="Filter">';
     echo '</form>';
 
-    // Table
     if ($results) {
         echo '<table class="widefat fixed striped">';
         echo '<thead><tr>';
@@ -3180,24 +3168,24 @@ function provider_sales_history_rest(WP_REST_Request $request) {
     $current_user = wp_get_current_user();
     $username = $current_user->user_login;
 
-    // Get filter params
+
     $service = $request->get_param('service') ?? 'all';
     $from = $request->get_param('from') ?? null;
     $to = $request->get_param('to') ?? null;
 
-    // Base query
+
     $query = "SELECT service_name, DATE(created_at) AS created_at, SUM(price_provider) AS total_provider_cost
               FROM {$sales_table}
               WHERE provider_name = %s";
     $params = [$username];
 
-    // Add service filter
+
     if($service !== 'all') {
         $query .= " AND service_name = %s";
         $params[] = $service;
     }
 
-    // Add date filters
+
     if($from) {
         $query .= " AND created_at >= %s";
         $params[] = $from;
@@ -3211,7 +3199,6 @@ function provider_sales_history_rest(WP_REST_Request $request) {
 
     $results = $wpdb->get_results($wpdb->prepare($query, ...$params));
 
-    // Ensure float type for JS
     foreach($results as $r) {
         $r->total_provider_cost = (float)$r->total_provider_cost;
     }
@@ -3242,7 +3229,7 @@ function by_time_slot_rest(WP_REST_Request $request) {
 
     $service = $request->get_param('service') ?? 'all';
 
-    // Base query
+
     $query = "SELECT service_name, booking_time_slot AS start_time, booking_time_slot_length_min AS length_min, price_provider
               FROM {$sales_table}
               WHERE provider_name = %s";
@@ -3267,7 +3254,7 @@ function by_time_slot_rest(WP_REST_Request $request) {
         $slot_map[$time_range] += (float)$r->price_provider;
     }
 
-    // Convert to array for JSON
+
     $output = [];
     foreach ($slot_map as $range => $total) {
         $output[] = [
@@ -3850,7 +3837,7 @@ function generate_html_email_from_availability($availability_rows, $session_id) 
 function create_and_send_provider_emails($session_id){
     global $wpdb;
 
-    // Step 1: Get all unique providers in the session
+
     $providers = $wpdb->get_results($wpdb->prepare("
         SELECT DISTINCT p.provider_id, ps.sales_email
         FROM {$wpdb->prefix}provider_sites ps
@@ -3865,12 +3852,12 @@ function create_and_send_provider_emails($session_id){
         return;
     }
 
-    // Step 2: Loop through each provider
+
     foreach ($providers as $provider) {
         $provider_id = $provider->provider_id;
         $sales_email = $provider->sales_email;
 
-        // Fetch only this provider's availability rows for the session
+
         $availability_rows = $wpdb->get_results($wpdb->prepare("
             SELECT 
                 a.available_date,
@@ -3892,7 +3879,7 @@ function create_and_send_provider_emails($session_id){
             continue;
         }
 
-        // Generate and send the email
+
         $message = generate_html_email_for_provider($availability_rows, $session_id);
 
         $subject = 'Booked Tickets Receipt!';
@@ -3908,11 +3895,10 @@ function create_and_send_provider_emails($session_id){
 function generate_html_email_for_provider($availability_rows, $session_id) {
     $grouped = [];
 
-    // Group by service
+
     foreach ($availability_rows as $row) {
         $service = $row['service_name'];
 
-        // Calculate from_time and to_time
         $start_time = DateTime::createFromFormat('H:i:s', $row['time_slot']);
         $from_time = $start_time->format('H:i');
         $start_time->modify("+" . $row['time_slot_length_min'] . " minutes");
@@ -3967,7 +3953,6 @@ function update_sales_record($session_id){
     $provider_sites_table = $wpdb->prefix . 'provider_sites';
     $sale_records_table = $wpdb->prefix . 'sale_records';
 
-    // Fetch all rows for this session   
     $sale_data_rows = $wpdb->get_results( $wpdb->prepare(
         "SELECT 
             p.provider_name,
@@ -4019,7 +4004,7 @@ function pcp_release_expired_pending() {
     $availability_table = "{$wpdb->prefix}availability";
     $bookings_table = "{$wpdb->prefix}bookings";
 
-    // Get expired pending availability slots
+
     $expired_rows = $wpdb->get_results("
         SELECT availability_id, session_id 
         FROM $availability_table 
@@ -4027,9 +4012,9 @@ function pcp_release_expired_pending() {
     ");
 
     $touched_sessions = [];
-    $verified_sessions = [];  // Cache to store verification results by session_id
-    $emails_sent = [];        // To ensure email sent once per session_id
-    $customer_emails = [];    // Cache customer emails per session_id
+    $verified_sessions = [];  
+    $emails_sent = [];        
+    $customer_emails = []; 
 
     foreach ($expired_rows as $row) {
         $availability_id = $row->availability_id;
@@ -4041,7 +4026,6 @@ function pcp_release_expired_pending() {
         ", $availability_id));
 
         if ($has_booking && $session_id) {
-            // Cache customer email per session_id to avoid redundant queries
             if (!isset($customer_emails[$session_id])) {
                 $customer_emails[$session_id] = $wpdb->get_var($wpdb->prepare("
                     SELECT customer_email FROM $bookings_table 
@@ -4051,11 +4035,9 @@ function pcp_release_expired_pending() {
             $customer_email = $customer_emails[$session_id];
 
             if (!isset($verified_sessions[$session_id])) {
-                // Verify payment once per session_id
                 $verification_result = pcp_manual_paystack_verify($session_id);
                 $verified_sessions[$session_id] = $verification_result;
 
-                // Send email only once if verification successful and email exists
                 if ($verification_result['success'] && $customer_email && !isset($emails_sent[$session_id])) {
                     create_and_send_email($customer_email, $session_id);
                     $emails_sent[$session_id] = true;
@@ -4066,7 +4048,6 @@ function pcp_release_expired_pending() {
 
             if (!$verification_result['success']) {
                 if (in_array($verification_result['status'], ['abandoned', 'failed', 'cancelled'])) {
-                    // Release availability slot and delete booking
                     $wpdb->query($wpdb->prepare("
                         UPDATE $availability_table
                         SET session_id = NULL,
@@ -4089,7 +4070,6 @@ function pcp_release_expired_pending() {
                 }
                 continue;
             } else {
-                // Payment successful, mark as booked
                 $wpdb->query($wpdb->prepare("
                     UPDATE $availability_table
                     SET status = 'b'
@@ -4103,7 +4083,6 @@ function pcp_release_expired_pending() {
             continue;
         }
 
-        // No booking or session, release slot
         $wpdb->query($wpdb->prepare("
             UPDATE $availability_table
             SET session_id = NULL,
@@ -4118,10 +4097,9 @@ function pcp_release_expired_pending() {
         }
     }
 
-    // Remove duplicate session ids
+
     $touched_sessions = array_unique($touched_sessions);
 
-    // Update availability spots for all touched sessions
     foreach ($touched_sessions as $sess_id) {
         update_providers_availability_spots($sess_id);
     }
@@ -4170,8 +4148,7 @@ function pcp_manual_paystack_verify($reference) {
         return ['success' => true, 'status' => 'success'];
     } elseif (in_array($paystack_status, ['abandoned', 'failed', 'cancelled'])) {
         return ['success' => false, 'status' => $paystack_status];
-    } else {
-        // ongoing, pending, processing        
+    } else {    
         return ['success' => false, 'status' => $paystack_status];
     }
     
