@@ -418,14 +418,22 @@ function provider_admin_custom_calendar() {
     ?>
     <div class="calendar-scroll-wrapper">
         <div id="calendar-container">
-            <label for="service-select">Select Service:</label>
-            <select id="service-select">
+
+            <label class= "hiddenService" for="service-select">Select Service:</label>
+            <select class= "hiddenService" id="service-select">
                 <option value="">-- Select Service --</option>
                 <?php foreach ($services as $service): ?>
                     <option value="<?= esc_attr($service->service_id); ?>">
                         <?= esc_html($service->service_name); ?>
                     </option>
                 <?php endforeach; ?>
+            </select>
+
+            <label class = "selectModeLabel" for="mode_selector">Select Mode:</label>
+            <select id="mode_selector">
+                <option value="bookingMode">Booking</option>
+                <option value="editMode">Edit</option>
+                <option value="deleteMode">Delete</option>
             </select>
 
             <div id="calendar-controls" style="display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin: 10px 0;">
@@ -474,6 +482,7 @@ function provider_admin_custom_calendar() {
         const clientModal = document.getElementById("client-info-modal");
         const continueBtn = document.getElementById("submit-client-info");
         const cancelBtn = document.getElementById("cancel-client-info");
+        const modeSelect = document.getElementById("mode_selector")
 
         const shortWeekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
         const fullWeekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
@@ -612,32 +621,120 @@ function provider_admin_custom_calendar() {
             prevBtn.disabled = currentYear === today.getFullYear() && currentMonth === today.getMonth();
         }
 
+        //Function got an extenstion, no longer just triggerBooking, now it is used to trigger delete or update
         function triggerBooking(slot, btn, startTime, endTimeStr, dateKey){
+            let currentMode = modeSelect.value;
             currentSelectedId = -1;
             btn.disabled = true;
+            let selectedAvailabilityId = null;
             const all_spots_info = JSON.parse(btn.dataset.spots_info);
 
-            for (const spot of all_spots_info) {
-                                if (spot.status === "a") {
-                                    selectedAvailabilityId = spot.availability_id;
-                                    break;
+            if(currentMode == "bookingMode")
+            {
+                for (const spot of all_spots_info) {
+                                    if (spot.status === "a") {
+                                        selectedAvailabilityId = spot.availability_id;
+                                        break;
+                                    }
                                 }
-                            }
 
-                            if (selectedAvailabilityId) {
-                                const confirmed = confirm("Are you sure you wish to book this spot?");
-                                if (!confirmed) {
-                                    return;
+                                if (selectedAvailabilityId) {
+                                    const confirmed = confirm("Are you sure you wish to book this spot?");
+                                    if (!confirmed) {                                        
+                                        return;
+                                    }
+                                    
+                                    //ADD UPDATE
+                                    currentSelectedId = selectedAvailabilityId;
+
+                                    clientModal.style.display = "flex";
+                                    btn.disabled = false;
+                                    
                                 }
-                                
-                                //ADD UPDATE
-                                currentSelectedId = selectedAvailabilityId;
+            }
+            if(currentMode == "deleteMode")
+            {
+                let id = all_spots_info[0].availability_id;                
+                
+                let confirmed2 = confirm(`Are you sure you want to delete this timeslot?`);
 
-                                clientModal.style.display = "flex";
-                                btn.disabled = false;
-                                
-                            }
+                if(!confirmed2)
+                {
+                    btn.disabled = false;
+                    return;
+                }
+                else
+                {
+                    let spotsBooked = all_spots_info.filter(spot => spot.status === "b").length;
+                    if(spotsBooked > 0)
+                    {
+                        let confirmed = confirm(`There are ${spotsBooked} bookings for this date, are you sure you want to delete them?`);
+                        if (!confirmed) {
+                            btn.disabled = false;
+                            return;
+                        }
+                        else
+                        {
+                            deleteTimeSlot(id);
+                        }
+                    }
+                    else
+                    {
+                        deleteTimeSlot(id);
+                    }
+                }
+
+            }
+            if(currentMode == "editMode")
+            {
+
+            }
             
+        }
+
+        function modeSelectStyling()
+        {
+            const allBtns = document.querySelectorAll('.book-btn');
+            const mode = modeSelect.value;
+
+        allBtns.forEach(btn => {
+            if (mode === "bookingMode") {
+                btn.textContent = "Book";
+                btn.style.backgroundColor = "#4caf50";
+            } else if (mode === "deleteMode") {                                           
+                btn.textContent = "Delete";
+                btn.style.backgroundColor = "red";
+            } else if (mode === "editMode") {
+                btn.textContent = "Edit";
+                btn.style.backgroundColor = "blue";
+            }
+        });
+        }
+
+        function deleteTimeSlot(id)
+        {
+            fetch(rest_object.rest_url + 'admin/delete_time_slot', {
+                                    method: 'POST',
+                                    headers: {
+                                        'Content-Type': 'application/json',
+                                        'X-WP-Nonce': rest_object.nonce,
+                                    },
+                                    body: JSON.stringify({
+                                        availability_id: id,
+                                    }),
+                                })
+                                .then(res => res.json())
+                                .then(data => {
+                                    if (data.success) {
+                                        updateCalendar();                                    
+                                        alert(data.message);                                        
+                                    } else {
+                                        alert("Error: " + (data.message || 'Unknown error'));
+                                    }
+                                })
+                                .catch(err => {
+                                    alert('An unexpected error occurred.');
+                                });
         }
 
     function generateCalendar(year, month, slotsData = {}) {
@@ -768,6 +865,7 @@ function provider_admin_custom_calendar() {
   }
 
         serviceSelect.addEventListener('change', updateCalendar);
+        modeSelect.addEventListener('change', modeSelectStyling);
 
         updateCalendar();
     });
@@ -790,6 +888,10 @@ function provider_admin_custom_calendar() {
     margin-right: 20px;
     padding: 5px;
     min-width: 180px;
+    }
+
+    .hiddenService {
+        display: none !important;
     }
 
     #my-calendar {
@@ -904,89 +1006,6 @@ function provider_admin_custom_calendar() {
     text-decoration: underline;
     }
 
-    #booking_summary table.booking-table {
-    table-layout: fixed;
-    width: 100%;
-    border-collapse: collapse;
-    }
-
-    #booking_summary table.booking-table td {
-    /*padding: 6px 12px;*/
-    font-size: 1rem;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    }
-
-    #booking_summary table.booking-table td:nth-child(1) {
-    width: 30%; /* Date */
-    }
-
-    #booking_summary table.booking-table td:nth-child(2) {
-    width: 30%; /* Time */
-    }
-
-    #booking_summary table.booking-table td:nth-child(3) {
-    width: auto; /* Cost */
-    text-align: right;
-    }
-
-    #booking_summary table.booking-table td:nth-child(4) {
-    width: auto; /* Delete button */
-    text-align: right;
-    min-width: 60px;
-    }
-
-    #booking_summary h2 {
-    font-size: 30px;
-    font-weight: bold;
-    border-bottom: 2px solid black;
-    padding-bottom: 5px;              
-    margin-bottom: 12px;
-    }
-
-    #booking_summary h3 {
-    font-size: 25px;
-    font-weight: bold;
-    margin-bottom: 10px;
-    }
-
-    #booking_summary h4 {
-    margin-top: 10px;
-    }
-
-
-    .booking-table {
-    width: 100%;
-    border-collapse: collapse;
-    margin-bottom: 20px;
-    }
-
-    .booking-table th, .booking-table td {
-    text-align: left;
-    padding-top: 0.5%;
-    }
-
-    .booking-total-table {
-    width: 100%;
-    border-top: 2px solid black;
-    border-bottom: 2px solid black;
-    margin-top: 15px;
-    padding-top: 10px;
-    font-weight: bold;
-    font-size: 1.2rem;
-    border-collapse: collapse;
-    }
-
-    .total-label {
-    text-align: left;
-    padding: 10px 0;
-    }
-
-    .total-amount {
-    text-align: right;
-    padding: 10px 0;
-    }
 
     .booked-wave {
     animation: wave-text 1s ease-in-out forwards;
@@ -996,20 +1015,6 @@ function provider_admin_custom_calendar() {
     background-color: yellow !important;
     }
 
-    .checkout-btn {
-    padding: 10px 20px;
-    font-size: 16px;
-    background-color: #1e88e5;
-    color: white;
-    border: none;
-    border-radius: 8px;
-    cursor: pointer;
-    transition: background-color 0.3s ease;
-    }
-
-    .checkout-btn:hover {
-    background-color: #1565c0;
-    }
 
     @keyframes wave-text {
     0%, 100% {
@@ -1287,6 +1292,231 @@ function admin_book_spot_available_rest(WP_REST_Request $request) {
         'success' => true,
         'message' => 'Spot booked',
     ]);
+}
+
+
+add_action('rest_api_init', function () {
+    register_rest_route('pcp/v1', '/admin/delete_time_slot', [
+        'methods' => 'POST',
+        'callback' => 'admin_delete_time_slot',
+        'permission_callback' => function ($request) {
+    $nonce = $request->get_header('X-WP-Nonce');
+    if (!wp_verify_nonce($nonce, 'wp_rest')) {
+        return false;
+    }
+
+    $user = wp_get_current_user();
+    if (!$user->exists()) {
+        return false;
+    }
+
+    global $wpdb;
+    $availability_id = intval($request->get_param('availability_id'));
+    if (!$availability_id) {
+        return false;
+    }
+
+    // Find provider linked to logged-in user
+    $provider = $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM {$wpdb->prefix}provider_sites WHERE provider_name = %s",
+        $user->user_login
+    ));
+    if (!$provider) {
+        return false;
+    }
+
+    // Check if the availability slot belongs to this provider via the service
+    $service = $wpdb->get_row($wpdb->prepare(
+        "SELECT s.provider_id 
+         FROM {$wpdb->prefix}availability AS a
+         INNER JOIN {$wpdb->prefix}services AS s ON a.service_id = s.service_id
+         WHERE a.availability_id = %d",
+         $availability_id
+    ));
+    if (!$service) {
+        return false;
+    }
+
+    return $service->provider_id == $provider->provider_id;
+    },
+        ]);
+});
+
+function admin_delete_time_slot(WP_REST_Request $request) {
+    global $wpdb;
+
+    $availability_id = intval($request->get_param('availability_id'));
+
+    if (!$availability_id || $availability_id == -1) {
+        return new WP_REST_Response([
+            'success' => false,
+            'message' => 'Missing spot ID',
+        ], 400);
+    }
+
+    $time_slot_to_delete = $wpdb->get_row($wpdb->prepare(
+        "SELECT available_date, time_slot, time_slot_length_min, service_id 
+         FROM {$wpdb->prefix}availability
+         WHERE availability_id=%d", $availability_id       
+    ));
+
+    $service_name = $wpdb->get_var($wpdb->prepare(
+        "SELECT service_name
+        FROM {$wpdb->prefix}services
+        WHERE service_id = %d",
+        $time_slot_to_delete->service_id
+    ));
+
+    if (!$time_slot_to_delete) {
+    return new WP_REST_Response([
+        'success' => false,
+        'message' => 'Time slot not found',
+    ], 404);
+    }
+    $wpdb->query('START TRANSACTION');
+
+    $record_info = $wpdb->get_row(
+        $wpdb->prepare(
+            "SELECT
+                s.service_name,
+                s.service_cost_main AS price_main,
+                s.service_cost_provider AS price_provider,
+                p.provider_name,
+                p.sales_email AS provider_email,
+                a.available_date AS booking_for_date,
+                a.time_slot AS booking_time_slot,
+                a.time_slot_length_min AS booking_time_slot_length_min
+            FROM {$wpdb->prefix}availability a
+            JOIN {$wpdb->prefix}services s ON s.service_id = a.service_id
+            JOIN {$wpdb->prefix}provider_sites p ON p.provider_id = s.provider_id
+            WHERE a.availability_id = %d",
+            $availability_id
+        )
+    );
+
+    $availability_ids_to_record = $wpdb->get_results(
+        $wpdb->prepare(
+            "SELECT availability_id
+            FROM {$wpdb->prefix}availability 
+            WHERE available_date = %s
+            AND time_slot = %s
+            AND time_slot_length_min = %d
+            AND service_id = %d
+            AND status = %s",
+            $time_slot_to_delete->available_date,
+            $time_slot_to_delete->time_slot,
+            $time_slot_to_delete->time_slot_length_min,
+            $time_slot_to_delete->service_id,
+            'b'
+        )
+    );
+    $total_inserted = 0;
+    $inserted_records = [];
+    foreach($availability_ids_to_record as $availability)
+    {
+    $id = $availability->availability_id;
+    $booked_info = $wpdb->get_row(
+        $wpdb->prepare(
+            "SELECT booked_by_main, customer_name, customer_email, customer_number
+            FROM {$wpdb->prefix}bookings
+            WHERE availability_id = %d",
+            $id
+        )
+    );
+
+    $inserted = $wpdb->insert(
+            "{$wpdb->prefix}customer_refunds",
+            [
+                'provider_name'                 => $record_info->provider_name,
+                'service_name'                  => $record_info->service_name,
+                'booking_for_date'              => $record_info->booking_for_date,
+                'booking_time_slot'             => $record_info->booking_time_slot,
+                'booking_time_slot_length_min'  => $record_info->booking_time_slot_length_min,
+                'price_main'                    => (float) $record_info->price_main,
+                'price_provider'                => (float) $record_info->price_provider,
+                'booked_by_main'                => $booked_info->booked_by_main ? 1 : 0,
+                'customer_name'                 => $booked_info->customer_name,
+                'customer_email'                => $booked_info->customer_email,
+                'customer_number'               => $booked_info->customer_number,
+            ],
+            [
+                '%s','%s','%s','%s','%d','%f','%f','%d','%s','%s','%s'
+            ]
+        );
+
+        if ($inserted !== false) {
+            $total_inserted++;
+            $inserted_records[] = (object) array_merge(
+                (array) $record_info,
+                (array) $booked_info
+            );
+        }
+    }
+
+    if ($total_inserted != count($availability_ids_to_record)) {
+        $wpdb->query('ROLLBACK');
+        return new WP_REST_Response([
+            'success' => false,
+            'message' => 'Refund insert failed',
+        ], 500);
+    }
+    
+
+    $updated = $wpdb->query(
+        $wpdb->prepare(
+            "UPDATE {$wpdb->prefix}sale_records
+            SET refund_process_init = 1
+            WHERE DATE(booking_for_date) = %s
+            AND booking_time_slot = %s
+            AND booking_time_slot_length_min = %d
+            AND service_name = %s
+            AND refund_process_init = 0",
+            $time_slot_to_delete->available_date,
+            $time_slot_to_delete->time_slot,
+            $time_slot_to_delete->time_slot_length_min,
+            $service_name
+        )
+    );
+
+    if ($updated === false) {
+        $wpdb->query('ROLLBACK');
+        return new WP_REST_Response(['success' => false, 'message' => 'Sale update failed'], 500);
+    }
+
+    $deleted = $wpdb->delete(
+        $wpdb->prefix . 'availability',
+        [
+            'available_date' => $time_slot_to_delete->available_date,
+            'time_slot' => $time_slot_to_delete->time_slot,
+            'time_slot_length_min' => $time_slot_to_delete->time_slot_length_min,
+            'service_id' => $time_slot_to_delete->service_id,
+        ],
+        [ '%s', '%s', '%d', '%d' ]
+    );
+
+    if ($deleted === false) {
+        $wpdb->query('ROLLBACK');
+        return new WP_REST_Response(['success' => false, 'message' => 'Delete failed'], 500);
+    }
+
+    $wpdb->query('COMMIT');
+
+    foreach ($inserted_records as $record) {
+        send_refund_email($record);
+    }
+
+    if ($deleted === 0) {
+        return new WP_REST_Response([
+            'success' => false,
+            'message' => 'No matching time slots found to delete',
+        ], 404);
+    }
+
+    return rest_ensure_response([
+            'success' => true,
+            'message' => 'Time slot deleted!',
+        ]); 
+    
 }
 
 //========
@@ -2028,7 +2258,27 @@ function create_tables() {
         price_main DECIMAL(10,2) NOT NULL,
         price_provider DECIMAL(10,2) NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        refund_process_init BOOL DEFAULT 0,
         PRIMARY KEY (sale_id)
+    ) $charset_collate;";        
+
+    $customer_refunds = $wpdb->prefix . 'customer_refunds';
+    $sql6 = "CREATE TABLE IF NOT EXISTS $customer_refunds (
+        refund_id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        provider_name VARCHAR(100) NOT NULL,
+        service_name VARCHAR(100) NOT NULL,
+        booking_for_date DATETIME NOT NULL,
+        booking_time_slot TIME NOT NULL,
+        booking_time_slot_length_min INT NOT NULL,
+        price_main DECIMAL(10,2) NOT NULL,
+        price_provider DECIMAL(10,2) NOT NULL,
+        status ENUM('t','p','d') DEFAULT 't',
+        booked_by_main  BOOLEAN NOT NULL,
+        customer_name VARCHAR(100),
+        customer_email VARCHAR(100),
+        customer_number VARCHAR(100),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (refund_id)
     ) $charset_collate;";        
 
     require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
@@ -2038,6 +2288,7 @@ function create_tables() {
     dbDelta($sql3);
     dbDelta($sql4);
     dbDelta($sql5);
+    dbDelta($sql6);
 }
 
 add_action('init', 'register_provider_role');
@@ -2285,25 +2536,36 @@ function provider_services_manager_page() {
         // Round up to nearest 1 after adding 10%
         $service_cost_main = ceil($service_cost_provider * 1.1);
 
+        $valid_cost = $service_cost_provider >= 10;
+        $valid_maxSpots = $max_spots > 0;
+
+        
         $existing = $wpdb->get_var($wpdb->prepare(
             "SELECT COUNT(*) FROM $services_table WHERE service_name = %s AND provider_id = %d",
             $service_name, $provider_id
         ));
 
-        if ($existing > 0) {
-            echo '<div class="notice notice-warning"><p>Service already exists.</p></div>';
-        } else {
-            $wpdb->insert($services_table, [
-                'provider_id'           => $provider_id,
-                'service_name'          => $service_name,
-                'service_cost_provider' => $service_cost_provider,
-                'service_cost_main'     => $service_cost_main,
-                'max_spots'             => $max_spots,
-                'service_description'   => $service_description
-            ]);
+        if($valid_cost && $valid_maxSpots)
+            {
+                if ($existing > 0) {
+                    echo '<div class="notice notice-warning"><p>Service already exists.</p></div>';
+                } else {
+                    $wpdb->insert($services_table, [
+                        'provider_id'           => $provider_id,
+                        'service_name'          => $service_name,
+                        'service_cost_provider' => $service_cost_provider,
+                        'service_cost_main'     => $service_cost_main,
+                        'max_spots'             => $max_spots,
+                        'service_description'   => $service_description
+                    ]);
 
-            echo '<div class="updated"><p>Service added.</p></div>';
-        }
+                    echo '<div class="updated"><p>Service added.</p></div>';
+                }
+            }
+         else
+            {
+                echo '<div class="notice notice-warning"><p>Invalid cost or max spots</p></div>';
+            }
     }
 
     $availability_table = $wpdb->prefix . 'availability';
@@ -2330,35 +2592,41 @@ function provider_services_manager_page() {
         }
     }
 
-    // Edit service cost
-    if (isset($_POST['edit_service_submit'])) {
+    //Edit cost and service description
+    if (isset($_POST['edit_form_update'])) {
         $edit_id = intval($_POST['edit_service_id']);
         $new_cost_provider = floatval($_POST['new_service_cost_provider']);
         $new_cost_main = ceil($new_cost_provider * 1.1);
+        $new_service_description = strval($_POST['new_service_description']);
 
-        $valid = $wpdb->get_var($wpdb->prepare(
+        $exists = $wpdb->get_var($wpdb->prepare(
             "SELECT COUNT(*) FROM $services_table WHERE service_id = %d AND provider_id = %d",
             $edit_id, $provider_id
         ));
 
-        if ($valid) {
+        $valid_cost = $new_cost_provider > 10;
+
+        if ($exists && $valid_cost) {
             $wpdb->update(
                 $services_table,
                 [
                     'service_cost_provider' => $new_cost_provider,
-                    'service_cost_main'     => $new_cost_main
+                    'service_cost_main'     => $new_cost_main,
+                    'service_description'   => $new_service_description
                 ],
                 ['service_id' => $edit_id]
             );
-            echo '<div class="updated"><p>Service cost updated.</p></div>';
+            echo '<div class="updated"><p>Service description and cost updated.</p></div>';
         }
     }
+
+    
 
     // Add form
     echo '<form method="post" style="margin-bottom: 1em;">';
     echo '<input type="text" name="service_name" placeholder="New Service Name" required> ';
-    echo '<input type="number" name="service_cost" placeholder="Cost (Provider)" step="0.01" required> ';
-    echo '<input type="number" name="max_spots" placeholder="Max Spots" required> <br><br>';
+    echo '<input type="number" name="service_cost" placeholder="Cost (Provider)" step="0.01" min="10" required> ';
+    echo '<input type="number" name="max_spots" placeholder="Max Spots" min="1" required> <br><br>';
     echo '<textarea name="service_description" 
         placeholder="Service Description (255 characters max)" 
         maxlength="255" 
@@ -2379,24 +2647,43 @@ function provider_services_manager_page() {
         echo '<thead><tr><th>Service Name</th><th>Provider Cost</th><th>Main Cost</th><th>Max Spots</th><th>Service Description</th><th>Actions</th></tr></thead><tbody>';
 
         foreach ($services as $service) {
+            $service_id = intval($service->service_id);
             echo '<tr>';
             echo '<td>' . esc_html($service->service_name) . '</td>';
             echo '<td>R' . esc_html(number_format($service->service_cost_provider, 2)) . '</td>';
             echo '<td>R' . esc_html(number_format($service->service_cost_main, 2)) . '</td>';
             echo '<td>' . esc_html($service->max_spots) . '</td>';
             echo '<td>' . esc_html($service->service_description) . '</td>';
-            echo '<td>';
+            echo '<td>';            
+
+            echo '
+            <button type="button" class="button" onclick="toggleEditForm(' . $service_id . ')">Edit</button>
+
+            <div id="edit_form_' . $service_id . '" style="display:none; margin-top:10px;">
+                <form method="post" onsubmit="return confirm(\'Save changes?\');">
+                    <input type="hidden" name="edit_service_id" value="' . $service_id . '">
+
+                    <textarea name="new_service_description" 
+                    maxlength="255" 
+                    rows="4" 
+                    cols="50" 
+                    required>' . esc_html($service->service_description) . '</textarea> <br>
+
+                    <input type="number" value="'.esc_html(number_format($service->service_cost_provider, 2)) .'" name="new_service_cost_provider" step="0.01" min="10" required><br><br>
+
+                    <input type="submit" name="edit_form_update" class="button button-primary" value="Save">
+                    <button type="button" class="button" onclick="toggleEditForm(' . $service_id . ')">Cancel</button>
+                </form>
+            </div>
+            ';           
             echo '<form method="post" style="display:inline-block;margin-right:10px;" onsubmit="return confirm(\'Are you sure you want to delete this service?\');">';
             echo '<input type="hidden" name="delete_service_id" value="' . intval($service->service_id) . '">';
             echo '<input type="submit" class="button button-secondary" value="Delete">';
             echo '</form>';
 
-            echo '<form method="post" style="display:inline-block;" onsubmit="return confirm(\'Are you sure you want to update the service cost?\');">';
-            echo '<input type="hidden" name="edit_service_id" value="' . intval($service->service_id) . '">';
-            echo '<input type="number" name="new_service_cost_provider" placeholder="New Cost" step="0.01" style="width:100px;"> ';
-            echo '<input type="submit" name="edit_service_submit" class="button" value="Update">';
-            echo '</form>';
             echo '</td>';
+            
+            
             echo '</tr>';
         }
 
@@ -2404,6 +2691,23 @@ function provider_services_manager_page() {
     } else {
         echo '<p><em>No services found for this provider.</em></p>';
     }
+
+    echo '
+    <script>
+    function toggleEditForm(id) {
+        document.querySelectorAll("[id^=\'edit_form_\']").forEach(function(form) {
+            if (form.id !== "edit_form_" + id) {
+                form.style.display = "none";
+            }
+        });
+
+        const target = document.getElementById("edit_form_" + id);
+        if (!target) return;
+
+        target.style.display = (target.style.display === "block") ? "none" : "block";
+    }
+    </script>
+    ';
 
     echo '</div>';
 }
@@ -2480,17 +2784,44 @@ function provider_service_time_slots_page() {
 
     $days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 
+    echo '<form method="post" onsubmit="return confirm(\'Are you sure you want to add these time slots?\');" style="margin-bottom: 1em;">';
+
+    echo '<label for="service-select" style="margin-top:1em; margin-bottom:1em;">Select Service:</label>';
+
+    echo '<select id="service-select" name="service_id">';
+    $first = true; 
     foreach ($services as $service) {
-        $service_id = $service->service_id;
-        $service_name = $service->service_name;
-        $max_spots = $service->max_spots;
+        echo '<option value="' . esc_attr($service->service_id) . '"';
+        if ($first) {
+            echo ' selected';
+            $first = false;
+        }
+        echo '>' . esc_html($service->service_name) . '</option>';
+    }
+    echo '</select>';
 
-        echo '<h2 style="border-bottom: 2px solid black; padding-bottom: 5px; margin-bottom: 10px;">' . esc_html($service_name) . '</h2>';
+    $selected_service_id = isset($_POST['service_id']) ? intval($_POST['service_id']) : $services[0]->service_id;
 
+
+    $service = null;
+    foreach ($services as $s) {
+        if ($s->service_id == $selected_service_id) {
+            $service = $s;
+            break;
+        }
+    }
+
+    if (!$service) {
+        $service = $services[0]; 
+    }
+
+    $service_id = $service->service_id;
+    $service_name = $service->service_name;
+    $max_spots = $service->max_spots;
         
         $undo_data = '';
 
-        if (isset($_POST['add_time_slot_' . $service_id])) {
+        if (isset($_POST['add_time_slot'])) {
             $from_time = sanitize_text_field($_POST['from_time']);
             $to_time = sanitize_text_field($_POST['to_time']);
             $from_date = sanitize_text_field($_POST['from_date']);
@@ -2600,42 +2931,43 @@ function provider_service_time_slots_page() {
             }
         }
 
-        echo '<form method="post" onsubmit="return confirm(\'Are you sure you want to add these time slots?\');" style="margin-bottom: 1em;">';
+         echo '<div style="display: flex; gap: 2em; align-items: center; margin-bottom: 1.0em; margin-top: 1.0em;">';
+    echo '<div><label style="font-weight:bold;">From Time<br><input type="time" name="from_time" required></label></div>';
+    echo '<div><label style="font-weight:bold;">To Time<br><input type="time" name="to_time" required></label></div>';
+    echo '</div>';
 
-        echo '<div style="display: flex; gap: 20px; align-items: center; margin-bottom: 15px;">';
-        echo '<div><label style="font-weight:bold;">From Time<br><input type="time" name="from_time" required></label></div>';
-        echo '<div><label style="font-weight:bold;">To Time<br><input type="time" name="to_time" required></label></div>';
-        echo '</div>';
+    echo '<div style="display: flex; gap: 2em; align-items: center; margin-bottom: 1.0em;  margin-top: 1.0em;">';
+    echo '<div><label style="font-weight:bold;">From Date<br><input type="date" name="from_date" required></label></div>';
+    echo '<div><label style="font-weight:bold;">To Date<br><input type="date" name="to_date" required></label></div>';
+    echo '</div>';
 
-        echo '<div style="display: flex; gap: 20px; align-items: center; margin-bottom: 15px;">';
-        echo '<div><label style="font-weight:bold;">From Date<br><input type="date" name="from_date" required></label></div>';
-        echo '<div><label style="font-weight:bold;">To Date<br><input type="date" name="to_date" required></label></div>';
-        echo '</div>';
+    echo '<div style="font-weight: bold; margin-bottom: 7px;">Days of the Week<br>';
+    foreach ($days as $day) {
+        echo '<label style="margin-right: 15px; margin-top: 7px;">';
+        echo '<input type="checkbox" name="' . esc_attr($day) . '"> ' . ucfirst($day);
+        echo '</label>';
+    }
+    echo '</div>';
 
-        echo '<div style="font-weight: bold; margin-bottom: 7px;">Days of the Week<br>';
-        foreach ($days as $day) {
-            echo '<label style="margin-right: 15px; margin-top: 7px;">';
-            echo '<input type="checkbox" name="' . esc_attr($day) . '"> ' . ucfirst($day);
-            echo '</label>';
-        }
-        echo '</div>';
-
-        echo '<div style="display: flex; gap: 10px; align-items: center;">';
+    echo '<div style="display: flex; gap: 10px; align-items: center;">';
 
 
-        echo '<input type="submit" class="button button-primary" name="add_time_slot_' . esc_attr($service_id) . '" value="Add Time Slot">';
+    echo '<input type="submit" class="button button-primary" name="add_time_slot" value="Add Time Slot">';
 
-        echo '</form>';
+    
 
-        if (!empty($undo_data)) {
+    echo '</form>';
+    if (!empty($undo_data)) {
             echo '<form method="post" style="margin:0; display: inline-block;">';
             echo '<input type="hidden" name="undo_slots" value="' . esc_attr($undo_data) . '">';
             echo '<input type="submit" name="undo_action" class="button button-secondary" value="Undo">';
             echo '</form>';
         }
+    echo '</div>';
 
-        echo '</div>';
-    }
+
+        
+
 
     
 
@@ -2772,7 +3104,7 @@ function provider_bookings_dashboard_page() {
     echo '</form>';
 
     if ($results) {
-        echo '<table class="widefat fixed striped">';
+        echo '<table class="widefat striped">';
         echo '<thead><tr>';
         echo '<th>Date</th>';
         echo '<th>Time Start</th>';
@@ -2816,7 +3148,7 @@ function provider_payments_dashboard_menu() {
                 'provider-payments-dashboard',
                 'provider_payments_dashboard_page',
                 'dashicons-cart',
-                5
+                6
             );
         }
 }
@@ -3146,6 +3478,189 @@ function provider_payments_dashboard_page() {
 
     <?php
 }
+
+
+//Refund page
+add_action('admin_menu', 'provider_refund_dashboard_menu');
+
+function provider_refund_dashboard_menu() {
+        if (current_user_can('provider')) {
+            add_menu_page(
+                'Refunds',
+                'Refunds',
+                'read',
+                'provider-refunds-dashboard',
+                'provider_refunds_dashboard_page',
+                'dashicons-pressthis',
+                5
+            );
+        }
+}
+
+function provider_refunds_dashboard_page() {
+    global $wpdb;
+
+    $customer_refunds = $wpdb->prefix . 'customer_refunds';
+    $current_user = wp_get_current_user();
+    $username = $current_user->user_login;
+
+    // Fetch all refunds for this provider
+    $refunds = $wpdb->get_results(
+        $wpdb->prepare(
+            "SELECT * FROM {$customer_refunds} 
+             WHERE provider_name = %s
+             ORDER BY booking_for_date DESC, booking_time_slot ASC",
+            $username
+        )
+    );
+
+    // Split by status
+    $statuses = [
+        't' => [],
+        'p' => [],
+        'd' => [],
+    ];
+
+    foreach ($refunds as $refund) {
+        $status = $refund->status;
+        if (isset($statuses[$status])) {
+            $statuses[$status][] = $refund;
+        }
+    }
+
+    // Table styling
+    echo '<style>
+        .refunds-table { width: 90%; border-collapse: collapse; margin-bottom: 2rem; }
+        .refunds-table th, .refunds-table td { border: 1px solid #ccc; padding: 8px; text-align: left; }
+        .refunds-table th { background-color: #f5f5f5; }
+        .refunds-section { margin-bottom: 3rem; }
+        .status-btn { padding: 4px 8px; cursor: pointer; background-color: #0073aa; color: #fff; border: none; border-radius: 3px; }
+        .status-btn:hover { background-color: #005177; }
+    </style>';
+
+    // Include REST API JS call
+    ?>
+    <script>
+    async function changeRefundStatus(refundId, currentStatus) {
+        const nextStatus = currentStatus === 't' ? 'p' : 'd';
+        const nonce = '<?php echo wp_create_nonce("wp_rest"); ?>';
+
+        const response = await fetch('<?php echo esc_url(rest_url("pcp/v1/update_refund_status")); ?>', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-WP-Nonce': nonce
+            },
+            body: JSON.stringify({
+                refund_id: refundId,
+                new_status: nextStatus
+            })
+        });
+
+        const data = await response.json();
+        if(data.success) {
+            location.reload();
+        } else {
+            alert('Failed to update status: ' + (data.message || 'Unknown error'));
+        }
+    }
+    </script>
+    <?php
+
+    echo '<div class="refunds-dashboard">';
+    echo '<h1>Refunds</h1>';
+
+    $status_labels = [
+        't' => 'To do',
+        'p' => 'Pending',
+        'd' => 'Done',
+    ];
+
+    foreach ($statuses as $key => $list) {
+        echo '<div class="refunds-section">';
+        echo '<h3>' . esc_html($status_labels[$key]) . '</h3>';
+
+        if (!empty($list)) {
+            echo '<table class="refunds-table">';
+            echo '<thead>
+                    <tr>
+                        <th>Customer Name</th>
+                        <th>Email</th>
+                        <th>Number</th>
+                        <th>Service</th>
+                        <th>Date</th>
+                        <th>Time Slot</th>
+                        <th>Length (min)</th>
+                        <th>Price Main</th>
+                        <th>Price Provider</th>
+                        <th>Booked by Main</th>';
+            if ($key === 't' || $key === 'p') {
+                echo '<th>Action</th>';
+            }
+            echo '</tr></thead>';
+            echo '<tbody>';
+            foreach ($list as $refund) {
+                echo '<tr>';
+                echo '<td>' . esc_html($refund->customer_name) . '</td>';
+                echo '<td>' . esc_html($refund->customer_email) . '</td>';
+                echo '<td>' . esc_html($refund->customer_number) . '</td>';
+                echo '<td>' . esc_html($refund->service_name) . '</td>';
+                echo '<td>' . esc_html($refund->booking_for_date) . '</td>';
+                echo '<td>' . esc_html($refund->booking_time_slot) . '</td>';
+                echo '<td>' . esc_html($refund->booking_time_slot_length_min) . '</td>';
+                echo '<td>' . esc_html($refund->price_main) . '</td>';
+                echo '<td>' . esc_html($refund->price_provider) . '</td>';
+                echo '<td>' . ($refund->booked_by_main ? 'Yes' : 'No') . '</td>';
+                if ($key === 't' || $key === 'p') {
+                    echo '<td><button class="status-btn" onclick="changeRefundStatus(' . $refund->refund_id . ', \'' . $refund->status . '\')">Next Status</button></td>';
+                }
+                echo '</tr>';
+            }
+            echo '</tbody></table>';
+        } else {
+            echo '<p>No records.</p>';
+        }
+
+        echo '</div>';
+    }
+
+    echo '</div>';
+}
+
+// REST API endpoint to update status
+add_action('rest_api_init', function() {
+    register_rest_route('pcp/v1', '/update_refund_status', [
+        'methods' => 'POST',
+        'callback' => function(WP_REST_Request $request) {
+            global $wpdb;
+            $refund_id = intval($request->get_param('refund_id'));
+            $new_status = sanitize_text_field($request->get_param('new_status'));
+            $customer_refunds = $wpdb->prefix . 'customer_refunds';
+
+            $updated = $wpdb->update(
+                $customer_refunds,
+                ['status' => $new_status],
+                ['refund_id' => $refund_id],
+                ['%s'],
+                ['%d']
+            );
+
+            if ($updated !== false) {
+                return rest_ensure_response(['success' => true]);
+            } else {
+                return new WP_REST_Response(['success' => false, 'message' => 'Failed to update status'], 500);
+            }
+        },
+        'permission_callback' => function($request) {
+            $nonce = $request->get_header('X-WP-Nonce');
+            return wp_verify_nonce($nonce, 'wp_rest') && is_user_logged_in();
+        }
+    ]);
+});
+
+
+
+
 
 add_action('rest_api_init', function () {
     register_rest_route('pcp/v1', '/provider/sales_history', [
@@ -3990,6 +4505,15 @@ function update_sales_record($session_id){
     }
 }
 
+//sends customer and provider refund email
+function send_refund_email($record)
+{
+    $customer_email = $record->customer_email;
+    $customer_name  = $record->customer_name;
+    $provider_email = $record->provider_email;
+    $provider_name  = $record->provider_name;
+    $service_name   = $record->service_name;
+}
 
 
 
