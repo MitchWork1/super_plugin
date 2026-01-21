@@ -16,8 +16,25 @@
   padding: 0px;
 }
 
+#min_spots_header {
+  margin: 0;
+  padding: 0;
+}
+
+#min_spots_description {
+  margin-top: 0.5em;
+  margin-bottom: 0.8em;
+  font-weight: 400;
+  color:#000000;
+  font-size:large;
+}
+
 #service_description {
-  margin-bottom: 1em;
+  margin-top: 0.5em;
+  margin-bottom: 0.8em;
+  font-weight: 400;
+  color:#000000;
+  font-size:large;
 }
 
 

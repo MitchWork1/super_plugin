@@ -18,6 +18,8 @@ document.addEventListener("DOMContentLoaded", function () {
   const callbackUiOKBtn = document.getElementById("callback-ui-ok");
   const serviceDescription = document.getElementById("service_description");
   const serviceDescriptionDiv = document.getElementById("service_description_div");
+  const serviceMinSpotsDiv = document.getElementById("min_spots_div");
+  const  minCheckDiv = document.getElementById("min_check_div");
   let countdownTime = 600;
   let timerInterval = null;
   const timerDisplay = document.getElementById("timer-display");
@@ -25,7 +27,11 @@ document.addEventListener("DOMContentLoaded", function () {
   let timer_reset_current= 0;
   let timerStarted = false;
   let clientModalOpen = false;
+  let bookedWithMin = false;
 
+  if (clientModal) {
+        clientModal.style.display = "none"; 
+    }
 
   const shortWeekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
   const fullWeekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
@@ -73,7 +79,7 @@ document.addEventListener("DOMContentLoaded", function () {
     )
       .then((res) => res.json())
       .then((services) => {
-        $services_info = services;
+        services_info = services;
         serviceSelect.disabled = false;
         serviceSelect.innerHTML =
           '<option value="">-- Select Service --</option>';
@@ -103,6 +109,16 @@ document.addEventListener("DOMContentLoaded", function () {
         {
           serviceDescriptionDiv.style.display = "none";
         }
+
+        const minSpots = parseInt(services_info[0].min_spots, 10) || 0;
+
+        if (minSpots > 0) {
+          serviceMinSpotsDiv.style.display = "block";
+          serviceMinSpotsDiv.querySelector("p").textContent =
+            `${services_info[0].service_name} requires a minimum of ${minSpots} bookings for a selected time slot. If ${minSpots} spots are not filled before the date selected you will be notified and the refund process will start.`;
+        } else {
+          serviceMinSpotsDiv.style.display = "none";
+        }
           
         }
       })
@@ -115,6 +131,7 @@ document.addEventListener("DOMContentLoaded", function () {
 
   if(reference)
   {
+    clientModal.style.display = "none";
     fetch(rest_object.rest_url + "verify_payment", {
         method: "POST",
         headers: {
@@ -143,7 +160,7 @@ document.addEventListener("DOMContentLoaded", function () {
   });
 
 
-  let $services_info = [];
+  let services_info = [];
   let redirect_from_checkout = false;
   let sessionId;
   generateSessionId();
@@ -153,9 +170,15 @@ document.addEventListener("DOMContentLoaded", function () {
     const email = document.getElementById("client-email").value.trim();
     const number = document.getElementById("client-number").value.trim();
 
+    const checkbox = document.getElementById("min_spots_checkbox");
+
     if (!name || !email || !number) {
       alert("Please fill in all fields.");
       return;
+    }
+    if (checkbox && !checkbox.checked && checkbox.offsetParent !== null) {
+        alert("You must accept the minimum spots requirement to continue.");
+        return;
     }
 
     document.getElementById("redirect-message").style.display = "block";
@@ -181,6 +204,7 @@ document.addEventListener("DOMContentLoaded", function () {
           window.location.href = data.data.redirect_url;
         } else if (data.response && data.response.code === "invalid_email_address"){
           alert("Invalid email address");
+          document.getElementById("redirect-message").style.display = "none";
         }else {
           console.error("Payment init failed:", data.message || data);
           alert("There was an error. Please try again.");
@@ -441,11 +465,12 @@ window.addEventListener("pagehide", releaseSpots);
                   spotsAvailableList.push(spot.availability_id);
                 }
               }   
+
               
 
               const serviceId = serviceSelect.value;
               const providerId = providerSelect.value;
-              serviceInfo = $services_info.find(
+              serviceInfo = services_info.find(
                 (s) => s.service_id == serviceId
               );
               const providerName =
@@ -474,7 +499,13 @@ window.addEventListener("pagehide", releaseSpots);
                   if (data.success) {
                     selectedAvailabilityId = data.availability_id;
                     btn.textContent = "Booked!";
-                    btn.classList.add("booked-wave");                   
+                    btn.classList.add("booked-wave");         
+
+                    if(serviceInfo.min_spots > 0)
+                    {
+                      minCheckDiv.style.display = "block";     
+                    }
+                        
 
                     startTimer(false);
 
@@ -629,7 +660,7 @@ window.addEventListener("pagehide", releaseSpots);
                               "Error: " + (data.message || "Unknown error")
                             );
                             button.disabled = false;
-                            button.textContext = "Delete";
+                            button.textContent = "Delete";
                           }
                         })
                         .catch((err) => {
@@ -637,7 +668,7 @@ window.addEventListener("pagehide", releaseSpots);
                           alert("An unexpected error occurred.");
 
                           button.disabled = false;
-                          button.textContext = "Delete";
+                          button.textContent = "Delete";
                         });
                     });
 
@@ -749,7 +780,7 @@ const totalCost = Array.from(allCostTds)
       generateCalendar(currentYear, currentMonth, {});
       return;
     }
-    const selectedService = $services_info.find(
+    const selectedService = services_info.find(
       (s) => s.service_id == service
     );
 
@@ -765,6 +796,16 @@ const totalCost = Array.from(allCostTds)
       serviceDescriptionDiv.style.display = "none";
       serviceDescription.textContent = "";
     }
+
+    const minSpots = parseInt(selectedService.min_spots, 10) || 0;
+
+        if (minSpots > 0) {
+          serviceMinSpotsDiv.style.display = "block";
+          serviceMinSpotsDiv.querySelector("p").textContent =
+            `${selectedService.service_name} requires a minimum of ${minSpots} bookings for a selected time slot. If ${minSpots} spots are not filled before the date selected you will be notified and the refund process will start.`;
+        } else {
+          serviceMinSpotsDiv.style.display = "none";
+        }
 
     fetch(
       `${rest_object.rest_url}availability?service_id=${encodeURIComponent(

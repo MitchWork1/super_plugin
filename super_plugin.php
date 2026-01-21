@@ -177,6 +177,12 @@ function pcp_custom_calendar_shortcode() {
                     <option value="">-- Select Provider First --</option>
                 </select>
             </div>
+            <div id="min_spots_div" style="display:none;">
+                 <h6 id=min_spots_header>Minimum Spots Requirement</h6>
+                 <p id=min_spots_description>This service requires a minimum of spots_required bookings for a selected time slot. 
+                    If the minimum spots are not filled before the date selected you will be notified and the refund process will start.</p>
+            </div>
+            
             <div id="service_description_div" style="display: none;">
                 <h6 id=service_description_header>Service Description</h6>
                 <p id=service_description>Text</p>
@@ -198,7 +204,7 @@ function pcp_custom_calendar_shortcode() {
                     <div>Sunday</div>
                 </div>
                 <div class="calendar-body" id="calendar-body">
-                    <!-- Days + slots will appear here -->
+                    
                 </div>
         </div>
         <div id="booking_summary" style="display: none;">
@@ -239,23 +245,74 @@ function pcp_custom_calendar_shortcode() {
             <button id="timer-done-ok" style="padding:8px 12px;">Ok</button>
         </div>
     </div>
-    <div id="client-info-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background-color:rgba(0,0,0,0.6); z-index:9999; align-items:center; justify-content:center;">
-        <div style="background:#fff; padding:20px; border-radius:8px; max-width:400px; width:90%; box-shadow:0 4px 10px rgba(0,0,0,0.2);">
-            <h3 style="margin:0 0 5px 0;">Enter Details to continue</h3>
-            <label for="client-name">Name:</label><br>
-            <input type="text" id="client-name" style="width:100%; padding:8px; margin-bottom:10px;"><br>
-            <label for="client-name">Phone Number:</label><br>
-            <input type="text" id="client-number" style="width:100%; padding:8px; margin-bottom:10px;"><br>
-            <label for="client-name">Email:</label><br>
-            <input type="email" id="client-email" style="width:100%; padding:8px;"><br><br>
-            <button id="submit-client-info" style="padding:8px 12px;">Continue</button>
-            <button id="cancel-client-info" style="padding:8px 12px; background:#ccc; margin-left:10px;">Cancel</button>
+<div id="client-info-modal" style="
+    display:none; 
+    position:fixed; 
+    top:0; 
+    left:0; 
+    width:100%; 
+    height:100%; 
+    background-color:rgba(0,0,0,0.6); 
+    z-index:9999; 
+    display:flex; 
+    align-items:center; 
+    justify-content:center; 
+    padding:1em;
+">
+    <div style="
+        background:#fff; 
+        padding:1.5em; 
+        border-radius:0.5em; 
+        max-width:25em; 
+        width:90%; 
+        box-shadow:0 0.25em 0.625em rgba(0,0,0,0.2); 
+        overflow-y:auto; 
+        max-height:90vh;
+        font-size:1em;
+    ">
+        <h3 style="margin:0 0 0.5em 0; font-size:1.2em;">Enter Details to continue</h3>
 
-            <p id="redirect-message" style="margin-top:15px; font-weight:bold; color:green; display:none;">You will be redirected shortly.</p>
+        <label for="client-name" style="font-size:1em;">Name:</label><br>
+        <input type="text" id="client-name" style="width:100%; padding:0.5em; margin-bottom:0.75em; font-size:1em;"><br>
 
-            <div style="font-size:12px;color:#888;margin-top:20px;;">Disclaimer: There is a non-refundable admin fee included in your payment - For cancellations and refunds of activities, please contact your chosen service provider directly.</div>
+        <label for="client-number" style="font-size:1em;">Phone Number:</label><br>
+        <input type="text" id="client-number" style="width:100%; padding:0.5em; margin-bottom:0.75em; font-size:1em;"><br>
+
+        <label for="client-email" style="font-size:1em;">Email:</label><br>
+        <input type="email" id="client-email" style="width:100%; padding:0.5em; margin-bottom:1em; font-size:1em;"><br>
+
+
+        <div id="min_check_div" style="
+            display:none; 
+            margin-top:1em; 
+            padding:1em; 
+            border:0.0625em solid #ddd; 
+            border-radius:0.375em; 
+            background:#f9f9f9; 
+            font-size:1em;
+        ">
+            <h3 style="margin:0 0 0.5em 0; font-size:1.1em;">Minimum Spots Requirement</h3>
+            <p style="margin-bottom:0.75em; line-height:1.4;">
+                Your order contains services that require a minimum amount of bookings. 
+                If the minimum spots are not filled before the date selected, you will be notified and the refund process will start.
+            </p>
+            <label style="display:flex; align-items:center; cursor:pointer; font-size:1em;">
+                <input type="checkbox" id="min_spots_checkbox" style="margin-right:0.5em;">
+                I have read and accept that a service may need to be refunded if the minimum spots are not filled before the date.
+            </label>
+        </div>
+
+        <button id="submit-client-info" style="padding:0.5em 1em; font-size:1em; margin-top:1em;">Continue</button>
+        <button id="cancel-client-info" style="padding:0.5em 1em; font-size:1em; background:#ccc; margin-left:0.5em;">Cancel</button>
+
+        <p id="redirect-message" style="margin-top:1em; font-weight:bold; color:green; display:none; font-size:0.95em;">You will be redirected shortly.</p>
+
+        <div style="font-size:0.85em; color:#888; margin-top:1em;">
+            Disclaimer: There is a non-refundable admin fee included in your payment - For cancellations and refunds of activities, please contact your chosen service provider directly.
         </div>
     </div>
+</div>
+
     </div>
 
     <?php
@@ -281,7 +338,7 @@ function pcp_rest_get_services(WP_REST_Request $request) {
     $services_table = $wpdb->prefix . 'services';
 
     $services = $wpdb->get_results($wpdb->prepare(
-        "SELECT service_id, service_name, service_cost_main, service_description FROM $services_table WHERE provider_id = %d",
+        "SELECT service_id, service_name, service_cost_main, service_description, min_spots FROM $services_table WHERE provider_id = %d",
         $provider_id
     ));
 
@@ -428,13 +485,24 @@ function provider_admin_custom_calendar() {
                     </option>
                 <?php endforeach; ?>
             </select>
-
+            <div id="mode-time-wrapper" style="display:flex; align-items:center; gap:1em; margin-bottom:1em;">
             <label class = "selectModeLabel" for="mode_selector">Select Mode:</label>
             <select id="mode_selector">
-                <option value="bookingMode">Booking</option>
-                <option value="editMode">Edit</option>
-                <option value="deleteMode">Delete</option>
+                <option value="bookingMode">Make Booking</option>
+                <option value="addMode">Add Timeslot</option>
+                <option value="deleteMode">Delete Timeslot</option>
             </select>
+            <div id="time-inputs" style="opacity:0; pointer-events:none; transition: opacity 0.2s;">
+            <label>
+                From Time<br>
+                <input type="time" id="from_time_cal" name="from_time_cal" required>
+            </label>
+            <label>
+                To Time<br>
+                <input type="time" id="to_time_cal" name="to_time_cal" required>
+            </label>
+            </div>
+                </div>
 
             <div id="calendar-controls" style="display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin: 10px 0;">
                 <button id="prev-month" disabled>&laquo; Previous</button>
@@ -482,7 +550,13 @@ function provider_admin_custom_calendar() {
         const clientModal = document.getElementById("client-info-modal");
         const continueBtn = document.getElementById("submit-client-info");
         const cancelBtn = document.getElementById("cancel-client-info");
-        const modeSelect = document.getElementById("mode_selector")
+        const modeSelect = document.getElementById("mode_selector");
+        const fromTime = document.getElementById("from_time_cal");
+        const toTime   = document.getElementById("to_time_cal");
+        const timeInputsWrapper = document.getElementById("time-inputs");
+        let passedToday = false;
+
+
 
         const shortWeekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
         const fullWeekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
@@ -591,6 +665,7 @@ function provider_admin_custom_calendar() {
             if (!selectedService) {
                 generateCalendar(currentYear, currentMonth, {});
                 updateControls();
+                modeSelectStyling();   
                 return;
             }
 
@@ -609,6 +684,7 @@ function provider_admin_custom_calendar() {
             .then(data => {
                 generateCalendar(currentYear, currentMonth, data);
                 updateControls();
+                modeSelectStyling();   
             })
             .catch(err => {
                 console.error("Availability fetch failed", err);
@@ -639,7 +715,7 @@ function provider_admin_custom_calendar() {
                                 }
 
                                 if (selectedAvailabilityId) {
-                                    const confirmed = confirm("Are you sure you wish to book this spot?");
+                                    let confirmed = confirm("Are you sure you wish to book this spot?");
                                     if (!confirmed) {                                        
                                         return;
                                     }
@@ -685,7 +761,7 @@ function provider_admin_custom_calendar() {
                 }
 
             }
-            if(currentMode == "editMode")
+            if(currentMode == "addMode")
             {
 
             }
@@ -694,6 +770,13 @@ function provider_admin_custom_calendar() {
 
         function modeSelectStyling()
         {
+            if(modeSelect.value == "addMode") {
+                timeInputsWrapper.style.opacity = "1";
+                timeInputsWrapper.style.pointerEvents = "auto";
+            } else {
+                timeInputsWrapper.style.opacity = "0";
+                timeInputsWrapper.style.pointerEvents = "none";
+            }
             const allBtns = document.querySelectorAll('.book-btn');
             const mode = modeSelect.value;
 
@@ -704,8 +787,8 @@ function provider_admin_custom_calendar() {
             } else if (mode === "deleteMode") {                                           
                 btn.textContent = "Delete";
                 btn.style.backgroundColor = "red";
-            } else if (mode === "editMode") {
-                btn.textContent = "Edit";
+            } else if (mode === "addMode") {
+                btn.textContent = "Add";
                 btn.style.backgroundColor = "blue";
             }
         });
@@ -727,7 +810,7 @@ function provider_admin_custom_calendar() {
                                 .then(data => {
                                     if (data.success) {
                                         updateCalendar();                                    
-                                        alert(data.message);                                        
+                                        alert(data.message);                                   
                                     } else {
                                         alert("Error: " + (data.message || 'Unknown error'));
                                     }
@@ -750,11 +833,10 @@ function provider_admin_custom_calendar() {
       const empty = document.createElement("div");
       empty.classList.add("day-cell", "empty");
       calendarBody.appendChild(empty);
-    }
-
+    }    
     for (let day = 1; day <= daysInMonth; day++) {
-      const dayCell = document.createElement("div");
-      dayCell.classList.add("day-cell");
+            const dayCell = document.createElement("div");
+            dayCell.classList.add("day-cell");      
 
       const isToday =
         year === today.getFullYear() &&
@@ -768,6 +850,134 @@ function provider_admin_custom_calendar() {
       dayNumber.classList.add("day-number");
       dayNumber.textContent = day;
       dayCell.appendChild(dayNumber);
+
+      
+
+      if(isToday || passedToday)
+      {
+        passedToday = true;
+        const dayCellButton = document.createElement("button");
+        dayCellButton.classList.add("day-cell-button");
+        dayCellButton.textContent = "Add";
+        const fullDate = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;        
+        dayCellButton.dataset.date = fullDate;
+
+        Object.assign(dayCellButton.style, {
+        position: "absolute",
+        top: "0",
+        left: "0",
+        width: "100%",
+        height: "100%",
+        backgroundColor: "#90d3ff",
+        color: "black",
+        border: "none",
+        fontSize: "16px",
+        fontWeight: "bold",
+        display: "flex",
+        justifyContent: "center",
+        alignItems: "center",
+        opacity: "0",
+        pointerEvents: "none",
+        transition: "opacity 0.2s ease-in-out",
+        zIndex: "999",
+        border: "2px solid #07bcf3",
+        borderRadius: "8px"
+        });
+
+        dayCellButton.addEventListener("click", (e) => {
+
+                e.stopPropagation();
+                
+                let date = dayCellButton.dataset.date;
+                let selectedDate = new Date(date + "T00:00:00");
+                let today = new Date();
+
+                if (selectedDate < today)
+                {
+                    alert("Cannot add a time slot for a past date.");
+                    return;
+                }
+
+                fromTime.setCustomValidity("");
+                toTime.setCustomValidity("");
+
+                if (!fromTime.checkValidity()) {
+                fromTime.reportValidity();
+                return;
+                }
+
+                if (!toTime.checkValidity()) {
+                toTime.reportValidity();
+                return;
+                }
+
+                const [fh, fm] = fromTime.value.split(":").map(Number);
+                const [th, tm] = toTime.value.split(":").map(Number);
+
+                const fromMinutes = fh * 60 + fm;
+                const toMinutes   = th * 60 + tm;
+
+                if (fromMinutes >= toMinutes) {
+                toTime.setCustomValidity("To Time must be later than From Time");
+                toTime.reportValidity();
+                return;
+                }
+                                let confirmed2 = confirm("Are you sure you wish to book this spot?");
+                                    if (!confirmed2) {                                        
+                                        return;
+                                    }
+                
+                let service_id = serviceSelect.value;
+
+                 fetch(rest_object.rest_url + 'admin/add_time_slot', {
+                                    method: 'POST',
+                                    headers: {
+                                        'Content-Type': 'application/json',
+                                        'X-WP-Nonce': rest_object.nonce,
+                                    },
+                                    body: JSON.stringify({
+                                        date: date,
+                                        from_time:fromTime.value,
+                                        to_time:toTime.value,
+                                        service_id:service_id,
+                                    }),
+                                })
+                                .then(res => res.json())
+                                .then(data => {
+                                    if (data.success) {
+                                        updateCalendar();                                    
+                                        alert(data.message);                                        
+                                    } else {
+                                        alert("Error: " + (data.message || 'Unknown error'));
+                                    }
+                                })
+                                .catch(err => {
+                                    alert('An unexpected error occurred.');
+                                });
+
+                
+            });
+
+        dayCell.appendChild(dayCellButton);
+
+        dayCell.addEventListener("mouseenter", () => {
+            if(modeSelect.value == "addMode")
+            {
+                dayCellButton.style.opacity = "1";
+                dayCellButton.style.pointerEvents = "auto";
+            }
+            
+            });
+            
+            dayCell.addEventListener("mouseleave", () => {
+                if(modeSelect.value == "addMode")
+                {
+                    dayCellButton.style.opacity = "0";
+                    dayCellButton.style.pointerEvents = "none";
+                }
+            });
+    }
+      
 
       const dateKey = `${year}-${String(month + 1).padStart(2, "0")}-${String(
         day
@@ -867,14 +1077,14 @@ function provider_admin_custom_calendar() {
         serviceSelect.addEventListener('change', updateCalendar);
         modeSelect.addEventListener('change', modeSelectStyling);
 
-        updateCalendar();
+        updateCalendar();        
     });
     </script>
 
     <style>
     #calendar-container {
     max-width: 1050px;
-    margin: 20px auto;
+    margin: 0px auto;
     font-family: Arial, sans-serif;
     }
 
@@ -938,6 +1148,10 @@ function provider_admin_custom_calendar() {
     overflow: hidden;
     box-sizing: border-box;
     white-space: nowrap;
+    }
+
+    .day-cell-button:hover {
+        display: flex;
     }
 
     .day-cell.today {
@@ -1385,10 +1599,12 @@ function admin_delete_time_slot(WP_REST_Request $request) {
                 p.sales_email AS provider_email,
                 a.available_date AS booking_for_date,
                 a.time_slot AS booking_time_slot,
-                a.time_slot_length_min AS booking_time_slot_length_min
+                a.time_slot_length_min AS booking_time_slot_length_min,
+                b.booked_by_main
             FROM {$wpdb->prefix}availability a
             JOIN {$wpdb->prefix}services s ON s.service_id = a.service_id
             JOIN {$wpdb->prefix}provider_sites p ON p.provider_id = s.provider_id
+            JOIN {$wpdb->prefix}bookings b ON b.availability_id = a.availability_id
             WHERE a.availability_id = %d",
             $availability_id
         )
@@ -1423,6 +1639,7 @@ function admin_delete_time_slot(WP_REST_Request $request) {
             $id
         )
     );
+
 
     $inserted = $wpdb->insert(
             "{$wpdb->prefix}customer_refunds",
@@ -1514,11 +1731,127 @@ function admin_delete_time_slot(WP_REST_Request $request) {
 
     return rest_ensure_response([
             'success' => true,
-            'message' => 'Time slot deleted!',
+            'message' => 'Time slot deleted! Ensure refunds are processed if applicable.',
         ]); 
     
 }
 
+add_action('rest_api_init', function () {
+    register_rest_route('pcp/v1', '/admin/add_time_slot', [
+        'methods' => 'POST',
+        'callback' => 'admin_add_time_slot',
+        'permission_callback' => function ($request) {
+    $nonce = $request->get_header('X-WP-Nonce');
+    if (!wp_verify_nonce($nonce, 'wp_rest')) {
+        return false;
+    }
+
+    $user = wp_get_current_user();
+    if (!$user->exists()) {
+        return false;
+    }
+    
+    
+    global $wpdb;
+
+    $provider = $wpdb->get_row($wpdb->prepare(
+        "SELECT * FROM {$wpdb->prefix}provider_sites WHERE provider_name = %s",
+        $user->user_login
+    ));
+    if (!$provider) {
+        return false;
+    }
+    $service_id  = intval( $request->get_param('service_id') );
+    $provider_id = $provider->provider_id;
+
+    $service = $wpdb->get_row( $wpdb->prepare(
+        "SELECT provider_id FROM {$wpdb->prefix}services WHERE service_id = %d",
+        $service_id
+    ) );
+    if (!$service) {
+        return false;
+    }
+
+    return intval($service->provider_id) === intval($provider->provider_id);
+    },
+        ]);
+});
+
+
+function admin_add_time_slot( $request ) {
+    global $wpdb;
+    $availability_table = $wpdb->prefix . 'availability';
+
+    $params = $request->get_json_params();
+    $available_date = $params['date'];
+    $from_time      = $params['from_time'];
+    $to_time        = $params['to_time'];
+    $service_id     = intval($params['service_id']);
+
+    $ft_parts = explode(':', $from_time);
+    $tt_parts = explode(':', $to_time);
+    if (count($ft_parts) !== 2 || count($tt_parts) !== 2) {
+        return new WP_Error('invalid_time', 'From Time or To Time is invalid', ['status' => 400]);
+    }
+
+    $from_minutes = intval($ft_parts[0]) * 60 + intval($ft_parts[1]);
+    $to_minutes   = intval($tt_parts[0]) * 60 + intval($tt_parts[1]);
+
+    if ($from_minutes >= $to_minutes) {
+        return new WP_Error('invalid_time', 'From Time must be earlier than To Time', ['status' => 400]);
+    }
+
+    $slot_length = $to_minutes - $from_minutes;
+
+
+    $max_spots = $wpdb->get_var( $wpdb->prepare(
+        "SELECT max_spots FROM {$wpdb->prefix}services WHERE service_id = %d",
+        $service_id
+    ));
+    if (!$max_spots) {
+        return new WP_Error('invalid_service', 'Service not found', ['status' => 404]);
+    }
+
+
+    $existing_count = $wpdb->get_var( $wpdb->prepare(
+        "SELECT COUNT(*) FROM {$availability_table} 
+         WHERE service_id = %d AND available_date = %s AND time_slot = %s AND time_slot_length_min = %d",
+        $service_id, $available_date, $from_time, $slot_length
+    ));
+
+    error_log("Checking existing: service_id=$service_id, date=$available_date, time=$from_time, slot_length=$slot_length, exisiting count: $existing_count");
+
+
+    if ($existing_count > 0) {
+        return new WP_Error(
+            'slots_exist',
+            'Time slots already exist for this service/date/time. Cannot add new slots.',
+            ['status' => 409]
+        );
+    }
+
+
+    $inserted = 0;
+    for ($i = 0; $i < $max_spots; $i++) {
+        $success = $wpdb->insert($availability_table, [
+            'service_id' => $service_id,
+            'available_date' => $available_date,         
+            'time_slot' => $from_time,                   
+            'time_slot_length_min' => $slot_length,      
+            'status' => 'a'
+        ]);
+        if ($success !== false) {
+            $inserted++;
+        }
+    }
+
+    return [
+        'success' => true,
+        'inserted_slots' => $inserted,
+        'max_spots' => $max_spots,
+        'message' => "$inserted slots added successfully" // <-- add this
+    ];
+}
 //========
 //Rest API 
 //========
@@ -2214,6 +2547,7 @@ function create_tables() {
         service_cost_provider DECIMAL(10,2) NOT NULL,
         service_cost_main DECIMAL(10,2) NOT NULL,
         max_spots SMALLINT UNSIGNED NOT NULL DEFAULT 8,
+        min_spots SMALLINT UNSIGNED DEFAULT 0,
         service_description VARCHAR(255),
         PRIMARY KEY (service_id),
         FOREIGN KEY (provider_id) REFERENCES $provider_sites_table(provider_id) ON DELETE CASCADE
@@ -2399,8 +2733,7 @@ function provider_manager_page() {
                   </span></td>';
 
             echo '<td><span class="key-container">
-                    <span id="' . esc_attr($hmac_id) . '" class="key-text" data-value="' . esc_attr($p->hmac_secret) . '" data-visible="false">••••••••••••••••••••••••••••••</span>
-                    <span id="' . esc_attr($hmac_id) . '-toggle" onclick="toggleKeyVisibility(\'' . esc_js($hmac_id) . '\')">' . $eyeSVG . '</span>
+                    <span id="Secret" class="key-text" data-value="Hidden"
                   </span></td>';
 
             echo '<td>' . ($p->active ? 'Yes' : 'No') . '</td>';
@@ -2532,12 +2865,14 @@ function provider_services_manager_page() {
         $max_spots = intval($_POST['max_spots']);
         $service_description = sanitize_text_field($_POST['service_description']);
         $service_description = substr($service_description, 0, 255);
+        $min_spots = intval($_POST['min_spots_input'] ?? 0);
 
         // Round up to nearest 1 after adding 10%
         $service_cost_main = ceil($service_cost_provider * 1.1);
 
         $valid_cost = $service_cost_provider >= 10;
         $valid_maxSpots = $max_spots > 0;
+        $valid_min_spots = $min_spots <= $max_spots;
 
         
         $existing = $wpdb->get_var($wpdb->prepare(
@@ -2545,7 +2880,7 @@ function provider_services_manager_page() {
             $service_name, $provider_id
         ));
 
-        if($valid_cost && $valid_maxSpots)
+        if($valid_cost && $valid_maxSpots && $valid_min_spots)
             {
                 if ($existing > 0) {
                     echo '<div class="notice notice-warning"><p>Service already exists.</p></div>';
@@ -2556,6 +2891,7 @@ function provider_services_manager_page() {
                         'service_cost_provider' => $service_cost_provider,
                         'service_cost_main'     => $service_cost_main,
                         'max_spots'             => $max_spots,
+                        'min_spots'             => $min_spots,
                         'service_description'   => $service_description
                     ]);
 
@@ -2598,26 +2934,34 @@ function provider_services_manager_page() {
         $new_cost_provider = floatval($_POST['new_service_cost_provider']);
         $new_cost_main = ceil($new_cost_provider * 1.1);
         $new_service_description = strval($_POST['new_service_description']);
+        $new_min_spots = intval($_POST['new_min_spots']  ?? 0);
 
-        $exists = $wpdb->get_var($wpdb->prepare(
-            "SELECT COUNT(*) FROM $services_table WHERE service_id = %d AND provider_id = %d",
+        $service_row = $wpdb->get_row($wpdb->prepare(
+            "SELECT * FROM $services_table WHERE service_id = %d AND provider_id = %d",
             $edit_id, $provider_id
         ));
 
+        $max_spots = intval($service_row->max_spots ?? 0);
         $valid_cost = $new_cost_provider > 10;
+        $valid_min_spots = $new_min_spots <= $max_spots;
 
-        if ($exists && $valid_cost) {
+        if ($service_row && $valid_cost && $valid_min_spots) {
             $wpdb->update(
                 $services_table,
                 [
                     'service_cost_provider' => $new_cost_provider,
                     'service_cost_main'     => $new_cost_main,
-                    'service_description'   => $new_service_description
+                    'service_description'   => $new_service_description,
+                    'min_spots'             => $new_min_spots
                 ],
                 ['service_id' => $edit_id]
             );
-            echo '<div class="updated"><p>Service description and cost updated.</p></div>';
+            echo '<div class="updated"><p>Service description and cost updated. If the minimum spots is lower than original please inform customers!</p></div>';
         }
+        else
+            {
+                echo '<div class="notice notice-warning"><p>Invalid cost or min spots</p></div>';
+            }
     }
 
     
@@ -2627,12 +2971,15 @@ function provider_services_manager_page() {
     echo '<input type="text" name="service_name" placeholder="New Service Name" required> ';
     echo '<input type="number" name="service_cost" placeholder="Cost (Provider)" step="0.01" min="10" required> ';
     echo '<input type="number" name="max_spots" placeholder="Max Spots" min="1" required> <br><br>';
+    echo '<input type=checkbox id="min_spots_checkbox" name="min_spots_checkbox" onclick="toggleMinSpotsField()"><label style="font-weight: 600;" for="min_spots_checkbox">Minimum spot requirement</label><br>' ;
+    echo '<input type="number" id="min_spots_input" name="min_spots_input" min="0" placeholder="Minimum Spots" disabled required style="display:none;margin-top:1em;">';
     echo '<textarea name="service_description" 
         placeholder="Service Description (255 characters max)" 
         maxlength="255" 
         rows="4" 
         cols="50" 
-        required></textarea> <br>';
+        style="margin-top:1em;"
+        required></textarea> <br>';    
     echo '<input type="submit" name="add_service_submit" class="button button-primary" value="Add Service">';
     echo '</form>';
 
@@ -2644,7 +2991,7 @@ function provider_services_manager_page() {
 
     if ($services) {
         echo '<table class="widefat striped">';
-        echo '<thead><tr><th>Service Name</th><th>Provider Cost</th><th>Main Cost</th><th>Max Spots</th><th>Service Description</th><th>Actions</th></tr></thead><tbody>';
+        echo '<thead><tr><th>Service Name</th><th>Provider Cost</th><th>Main Cost</th><th>Max Spots</th><th>Min Spots</th><th>Service Description</th><th>Actions</th></tr></thead><tbody>';
 
         foreach ($services as $service) {
             $service_id = intval($service->service_id);
@@ -2653,6 +3000,7 @@ function provider_services_manager_page() {
             echo '<td>R' . esc_html(number_format($service->service_cost_provider, 2)) . '</td>';
             echo '<td>R' . esc_html(number_format($service->service_cost_main, 2)) . '</td>';
             echo '<td>' . esc_html($service->max_spots) . '</td>';
+            echo '<td>' . esc_html($service->min_spots) . '</td>';
             echo '<td>' . esc_html($service->service_description) . '</td>';
             echo '<td>';            
 
@@ -2662,14 +3010,17 @@ function provider_services_manager_page() {
             <div id="edit_form_' . $service_id . '" style="display:none; margin-top:10px;">
                 <form method="post" onsubmit="return confirm(\'Save changes?\');">
                     <input type="hidden" name="edit_service_id" value="' . $service_id . '">
-
+                    <label>Service Description</label><br>
                     <textarea name="new_service_description" 
                     maxlength="255" 
                     rows="4" 
                     cols="50" 
                     required>' . esc_html($service->service_description) . '</textarea> <br>
 
-                    <input type="number" value="'.esc_html(number_format($service->service_cost_provider, 2)) .'" name="new_service_cost_provider" step="0.01" min="10" required><br><br>
+                    <label for="new_service_cost_provider">Service Cost</label><br>
+                    <input type="number" id="new_service_cost_provider" value="'.esc_html(number_format($service->service_cost_provider, 2)) .'" name="new_service_cost_provider" step="0.01" min="10" required><br><br>
+                    <label for="new_min_spots">Minimum Spots</label><br>
+                    <input type="number" id="new_min_spots" value="'.esc_html(number_format($service->min_spots, 2)) .'" name="new_min_spots" step="1" min="0" required><br><br>
 
                     <input type="submit" name="edit_form_update" class="button button-primary" value="Save">
                     <button type="button" class="button" onclick="toggleEditForm(' . $service_id . ')">Cancel</button>
@@ -2704,7 +3055,14 @@ function provider_services_manager_page() {
         const target = document.getElementById("edit_form_" + id);
         if (!target) return;
 
-        target.style.display = (target.style.display === "block") ? "none" : "block";
+        target.style.display = (target.style.display === "block") ? "none" : "block";        
+    }
+    function toggleMinSpotsField() {
+        const min_spots_checkbox = document.getElementById("min_spots_checkbox");
+        const min_spots_input = document.getElementById("min_spots_input");
+
+        min_spots_input.disabled = !min_spots_checkbox.checked;
+        min_spots_input.style.display = min_spots_checkbox.checked ? "block" : "none";
     }
     </script>
     ';
@@ -2799,6 +3157,8 @@ function provider_service_time_slots_page() {
         echo '>' . esc_html($service->service_name) . '</option>';
     }
     echo '</select>';
+
+    echo '<label><input type="checkbox" id="bulk-insert-toggle">Enable Bulk Insert</label>';
 
     $selected_service_id = isset($_POST['service_id']) ? intval($_POST['service_id']) : $services[0]->service_id;
 
@@ -2930,6 +3290,8 @@ function provider_service_time_slots_page() {
                 }
             }
         }
+        echo '<div id="bulk-insert-wrapper" class="bulk-insert-wrapper" style="display:none;">';
+
 
          echo '<div style="display: flex; gap: 2em; align-items: center; margin-bottom: 1.0em; margin-top: 1.0em;">';
     echo '<div><label style="font-weight:bold;">From Time<br><input type="time" name="from_time" required></label></div>';
@@ -2955,6 +3317,9 @@ function provider_service_time_slots_page() {
     echo '<input type="submit" class="button button-primary" name="add_time_slot" value="Add Time Slot">';
 
     
+    echo '</div>';
+
+    echo '</div>';
 
     echo '</form>';
     if (!empty($undo_data)) {
@@ -2963,15 +3328,22 @@ function provider_service_time_slots_page() {
             echo '<input type="submit" name="undo_action" class="button button-secondary" value="Undo">';
             echo '</form>';
         }
-    echo '</div>';
 
+    ?>
+    <script>
+        const checkbox = document.getElementById("bulk-insert-toggle");
+        const bulkWrapper = document.getElementById("bulk-insert-wrapper");
 
-        
+        checkbox.addEventListener("change", () => {
+        if (checkbox.checked) {
+            bulkWrapper.style.display = "block";
+        } else {
+            bulkWrapper.style.display = "none";
+        }
+        });
+    </script>
+    <?php
 
-
-    
-
-    echo '<div style="border-top: 2px solid black; margin: 20px 0; padding-top: 10px;">';
     echo do_shortcode('[provider_admin_custom_calendar]');
     echo '</div>';
 }
@@ -4507,13 +4879,155 @@ function update_sales_record($session_id){
 
 //sends customer and provider refund email
 function send_refund_email($record)
-{
-    $customer_email = $record->customer_email;
-    $customer_name  = $record->customer_name;
-    $provider_email = $record->provider_email;
-    $provider_name  = $record->provider_name;
-    $service_name   = $record->service_name;
+{    
+    $customer_email   = $record->customer_email ?? '';
+    $customer_name    = $record->customer_name ?? '';
+    $customer_number  = $record->customer_number ?? '';
+    $provider_name    = $record->provider_name ?? '';
+    $provider_email   = $record->provider_email ?? '';
+    $service_name     = $record->service_name ?? '';
+    $booking_for_date = $record->booking_for_date ?? '';
+    $booking_time_slot= $record->booking_time_slot ?? '';
+    $price_paid       = $record->price_main ?? 0;
+    $price_recieved   = $record->price_provider ?? 0;
+    $booked_by_main = $record->booked_by_main ?? 0;
+
+    $message1 = refund_email_provider($customer_name, $customer_email, $customer_number, $service_name, $provider_name, $price_paid, $price_recieved, $booked_by_main);
+    $message2 = refund_email_customer($customer_name, $provider_name, $service_name, $booking_for_date, $booking_time_slot, $price_paid, $provider_email, $booked_by_main);
+
+    $subject = 'Ticket Refund!';
+    $headers = array('Content-Type: text/html; charset=UTF-8');
+
+    if ($provider_email) {
+        $subject = "Refund Requested for $service_name";
+        $message = refund_email_provider($customer_name, $customer_email, $customer_number, $service_name, $provider_name, $price_paid, $price_recieved,  $booked_by_main);
+        $sent = wp_mail($provider_email, $subject, $message, $headers);
+        error_log("Provider email sent: " . ($sent ? "YES" : "NO"));
+    } else {
+        error_log("Provider email missing, not sending");
+    }
+
+    if ($customer_email) {
+        $subject = "Refund Request for $service_name";
+        $message = refund_email_customer($customer_name, $provider_name, $service_name, $booking_for_date, $booking_time_slot, $price_paid, $provider_email,  $booked_by_main);
+        $sent = wp_mail($customer_email, $subject, $message, $headers);
+        error_log("Customer email sent: " . ($sent ? "YES" : "NO"));
+    } else {
+        error_log("Customer email missing, not sending");
+    }
+
 }
+
+function refund_email_provider($customer_name, $customer_email, $customer_number, $service_name, $provider_name, $price_paid, $price_recieved, $booked_by_main) {
+
+    if ($booked_by_main == 1) {
+        $sale_type = "online / website sale";
+        $amount_paid_text = "R{$price_paid}";
+        $amount_recieved_text = "R{$price_recieved}";
+    } else {
+        $sale_type = "offline / private sale";
+        $amount_paid_text = "This was an offline/private sale";
+        $amount_recieved_text = "This was an offline/private sale";
+    }
+
+    $html = <<<HTML
+        <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333;">
+            <h2 style="color: #d9534f;">Refund Notification</h2>
+            <p>Dear <strong>{$provider_name}</strong>,</p>
+
+            <p>A refund needs to be processed for the following customer and service ({$sale_type}):</p>
+
+            <table style="width: 100%; border-collapse: collapse; margin-top: 15px; margin-bottom: 15px;">
+                <tr>
+                    <td style="padding: 8px; border: 1px solid #ccc;"><strong>Customer Name:</strong></td>
+                    <td style="padding: 8px; border: 1px solid #ccc;">{$customer_name}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 8px; border: 1px solid #ccc;"><strong>Customer Email:</strong></td>
+                    <td style="padding: 8px; border: 1px solid #ccc;">{$customer_email}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 8px; border: 1px solid #ccc;"><strong>Customer Phone:</strong></td>
+                    <td style="padding: 8px; border: 1px solid #ccc;">{$customer_number}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 8px; border: 1px solid #ccc;"><strong>Service:</strong></td>
+                    <td style="padding: 8px; border: 1px solid #ccc;">{$service_name}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 8px; border: 1px solid #ccc;"><strong>Amount Paid by Customer:</strong></td>
+                    <td style="padding: 8px; border: 1px solid #ccc;">{$amount_paid_text}</td>
+                </tr>
+                <tr>
+                    <td style="padding: 8px; border: 1px solid #ccc;"><strong>Amount Received by Provider:</strong></td>
+                    <td style="padding: 8px; border: 1px solid #ccc;">{$amount_recieved_text}</td>
+                </tr>
+            </table>
+
+            <p>Please ensure the refund is processed promptly.</p>
+
+            <p>This information is also stored on the refund page in your admin dashboard!</p>
+
+            <p>An email has also been sent to the customer informing them of this refund.</p>
+
+            <p>Thank you,</p>
+            <p><strong>{$provider_name}</strong></p>
+        </div>
+    HTML;
+
+    return $html;
+}
+
+
+function refund_email_customer($customer_name, $provider_name, $service_name, $service_date, $service_time, $price_paid, $provider_email, $booked_by_main){
+
+    if ($booked_by_main == 1) {
+        $amount_row = <<<HTML
+            <tr>
+                <td style="padding: 8px; border: 1px solid #ccc;"><strong>Amount Paid:</strong></td>
+                <td style="padding: 8px; border: 1px solid #ccc;">R{$price_paid}</td>
+            </tr>
+        HTML;
+    } else {
+        $amount_row = ""; // Do not show amount if offline/private sale
+    }
+
+    $html_customer = <<<HTML
+    <div style="font-family: Arial, sans-serif; font-size: 14px; color: #333;">
+        <h2 style="color: #d9534f;">Refund Requested</h2>
+        <p>Dear <strong>{$customer_name}</strong>,</p>
+
+        <p>The provider <strong>{$provider_name}</strong> has requested a refund for the following service:</p>
+
+        <table style="width: 100%; border-collapse: collapse; margin-top: 15px; margin-bottom: 15px;">
+            <tr>
+                <td style="padding: 8px; border: 1px solid #ccc;"><strong>Service:</strong></td>
+                <td style="padding: 8px; border: 1px solid #ccc;">{$service_name}</td>
+            </tr>
+            <tr>
+                <td style="padding: 8px; border: 1px solid #ccc;"><strong>Date & Time:</strong></td>
+                <td style="padding: 8px; border: 1px solid #ccc;">{$service_date} at {$service_time}</td>
+            </tr>
+            {$amount_row}
+        </table>
+
+        <p>The provider will be in contact with you to finalise the refund. If you do not hear from them, please reach out directly to the provider via email: <strong>{$provider_email}</strong>.</p>
+
+        <p>Otherwise, if there is still no response, please contact any of the following for assistance:</p>
+        <ul>
+            <li>Mitchell Konemann: mitchkonemann100@gmail.com - 083 770 6561</li>
+            <li>Megan: megan@guardiansofthedeep.org.za</li>
+            <li>Sally: sallys@guardiansofthedeep.org.za</li>
+        </ul>
+
+        <p>Thank you,</p>
+        <p><strong>{$provider_name}</strong></p>
+    </div>
+    HTML;
+
+    return $html_customer;
+}
+
 
 
 
