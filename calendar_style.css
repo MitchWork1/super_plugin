@@ -29,6 +29,54 @@
   font-size:large;
 }
 
+#terms_header {
+  margin: 0;
+  padding: 0;
+}
+
+#terms_description {
+  margin-top: 0.5em;
+  margin-bottom: 0.8em;
+  font-weight: 400;
+  color:#000000;
+  font-size:large;
+}
+
+
+#code_div {
+  margin-bottom: 1em;
+}
+
+#code_div_header {
+  margin: 0px;
+  padding: 0px;
+}
+
+#wild_body  {
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+  font-weight: 400;
+  color:#000000;
+  font-size:large;
+}
+
+#client-info-modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0,0,0,0.6);
+    z-index: 9999;
+    align-items: center;
+    justify-content: center;
+    padding: 1em;
+}
+
+
+
+
 #service_description {
   margin-top: 0.5em;
   margin-bottom: 0.8em;

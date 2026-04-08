@@ -19,7 +19,15 @@ document.addEventListener("DOMContentLoaded", function () {
   const serviceDescription = document.getElementById("service_description");
   const serviceDescriptionDiv = document.getElementById("service_description_div");
   const serviceMinSpotsDiv = document.getElementById("min_spots_div");
+  const termsDiv = document.getElementById("terms_div");
   const  minCheckDiv = document.getElementById("min_check_div");
+  const codeDiv = document.getElementById("code_div");
+  const codeBtn = document.getElementById("code_button");
+  const codeInput = document.getElementById("code_input");
+  const calendarBody = document.getElementById("calendar-body");
+  const myCalendar = document.getElementById("my-calendar");
+  const WILD_BODY_CARE_ID = 8;
+  let code = null;
   let countdownTime = 600;
   let timerInterval = null;
   const timerDisplay = document.getElementById("timer-display");
@@ -47,6 +55,188 @@ document.addEventListener("DOMContentLoaded", function () {
     }
   }
 
+  codeBtn.addEventListener("click", function(){
+    code = codeInput.value;
+    if(code)
+    {
+      triggerBookingWithCode(code);
+    }    
+  });
+
+function triggerBookingWithCode(code) {
+
+  codeBtn.disabled = true;
+  codeBtn.textContent = "Booking...";
+
+  fetch(`${rest_object.rest_url}book_with_code`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-WP-Nonce": rest_object.nonce,
+    },
+    body: JSON.stringify({
+      code: code,
+      session_id: sessionId,
+    }),
+  })
+
+  .then(res => res.json())
+
+  .then(data => {
+
+    if (!data.success) {
+        throw new Error(data.message || "Booking failed");
+    }
+
+    selectedAvailabilityId = data.availability_id;
+
+    const providerId = data.provider_id;
+    const providerName = data.provider_name;
+    const serviceId = data.service_id;
+    const serviceName = data.service_name;
+    const startTime = data.from_time;
+    const endTimeStr = data.to_time;
+    const dateKey = data.available_date;
+    const serviceCost = parseFloat(data.service_cost);
+    const minSpots = parseInt(data.min_spots);
+
+    codeBtn.textContent = "Booked!";
+    codeBtn.disabled = false;
+
+    if (minSpots > 0) minCheckDiv.style.display = "block";
+
+    startTimer(false);
+
+    let providerSection = document.querySelector(`.provider-section[data-provider-id="${providerId}"]`);
+
+    if (!providerSection) {
+      providerSection = document.createElement("div");
+      providerSection.classList.add("provider-section");
+      providerSection.dataset.providerId = providerId;
+
+      const providerHeading = document.createElement("h3");
+      providerHeading.textContent = `${providerName}:`;
+      providerSection.appendChild(providerHeading);
+
+      bookingSummary.appendChild(providerSection);
+    }
+
+    let serviceSection = providerSection.querySelector(`.service-section[data-service-id="${serviceId}"]`);
+
+    if (!serviceSection) {
+      serviceSection = document.createElement("div");
+      serviceSection.classList.add("service-section");
+      serviceSection.dataset.serviceId = serviceId;
+
+      const heading = document.createElement("h4");
+      heading.textContent = `${serviceName}:`;
+      serviceSection.appendChild(heading);
+
+      const table = document.createElement("table");
+      table.classList.add("booking-table");
+
+      const tbody = document.createElement("tbody");
+      table.appendChild(tbody);
+
+      serviceSection.appendChild(table);
+      providerSection.appendChild(serviceSection);
+    }
+
+    const tableBody = serviceSection.querySelector("tbody");
+
+    const row = document.createElement("tr");
+
+    row.innerHTML = `
+      <td>${formatDate(dateKey)}</td>
+      <td>${startTime} - ${endTimeStr}</td>
+      <td>R${serviceCost.toFixed(2)}</td>
+      <td></td>
+    `;
+
+    const delete_button = document.createElement("button");
+    delete_button.textContent = "Delete";
+    delete_button.dataset.availability_id = selectedAvailabilityId;
+
+    delete_button.addEventListener("click", (e) => {
+
+    const spot_id = e.target.dataset.availability_id;
+
+    fetch(`${rest_object.rest_url}release_spot`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-WP-Nonce": rest_object.nonce,
+      },
+      body: JSON.stringify({
+        availability_id: spot_id,
+        session_id: sessionId,
+      }),
+    })
+    .then(res => res.json())
+    .then(data => {
+      if (!data.success) return;
+
+      row.remove();
+
+      const tableBody = serviceSection.querySelector("tbody");
+      const table = serviceSection.querySelector("table");
+
+      if (!tableBody.querySelector("tr")) {
+        serviceSection.remove();
+      }
+
+      if (!providerSection.querySelector(".service-section")) {
+        providerSection.remove();
+      }
+
+      const anyRowsLeft = document.querySelector("#booking_summary table.booking-table tbody tr");
+      if (!anyRowsLeft) {
+        document.getElementById("booking_summary").style.display = "none";
+        document.getElementById("checkout_section").style.display = "none";
+        document.getElementById("booking_total").style.display = "none";
+      }
+
+      updateCalendar();
+
+      const allCostTds = document.querySelectorAll("#booking_summary table.booking-table tbody td:nth-child(3)");
+
+      const totalCost = Array.from(allCostTds)
+        .map(td => parseFloat(td.textContent.replace("R", "")))
+        .reduce((a,b)=>a+b,0);
+
+      document.querySelector(".total-amount").textContent = `R${totalCost.toFixed(2)}`;
+    });
+  });
+
+    row.querySelector("td:last-child").appendChild(delete_button);
+    tableBody.appendChild(row);
+
+    const allCostTds = document.querySelectorAll("#booking_summary table.booking-table tbody td:nth-child(3)");
+
+    const totalCost = Array.from(allCostTds)
+      .map(td => parseFloat(td.textContent.replace("R", "")))
+      .reduce((a,b)=>a+b,0);
+
+    document.querySelector(".total-amount").textContent = `R${totalCost.toFixed(2)}`;
+
+    document.getElementById("booking_total").style.display = "block";
+    document.getElementById("booking_summary").style.display = "block";
+    document.getElementById("checkout_section").style.display = "block";
+
+    codeBtn.textContent = "Book";
+    codeBtn.disabled = false;
+
+  })
+
+  .catch(err => {
+    codeBtn.disabled = false;
+    codeBtn.textContent = "Book";
+    alert(err.message);
+  });
+}
+
+
+
 
   updateWeekdays();
 
@@ -59,10 +249,18 @@ document.addEventListener("DOMContentLoaded", function () {
   const reference = queryParams.get("reference");
   const provider_id = queryParams.get("provider_id");
 
-  if (provider_id) {
-    providerSelect.value = provider_id;
-    fetch_services_info(provider_id);
+if (provider_id) {
+    const exists = Array.from(providerSelect.options).some(
+        option => option.value === provider_id
+    );
+
+    if (exists)
+    {
+      providerSelect.value = provider_id;
+      fetch_services_info(provider_id);    
+    }
     window.history.replaceState({}, document.title, window.location.pathname);
+
   }
 
   function fetch_services_info($provider_id){
@@ -119,6 +317,17 @@ document.addEventListener("DOMContentLoaded", function () {
         } else {
           serviceMinSpotsDiv.style.display = "none";
         }
+
+        const terms = services_info[0].terms;
+
+        if (terms && terms.length > 0) {
+          termsDiv.style.display = "block";
+          termsDiv.querySelector("#terms_description").textContent = terms;
+        } else {
+          termsDiv.style.display = "none";
+        }
+
+
           
         }
       })
@@ -171,6 +380,7 @@ document.addEventListener("DOMContentLoaded", function () {
     const number = document.getElementById("client-number").value.trim();
 
     const checkbox = document.getElementById("min_spots_checkbox");
+    const checkbox2 = document.getElementById("terms_checkbox");
 
     if (!name || !email || !number) {
       alert("Please fill in all fields.");
@@ -179,6 +389,11 @@ document.addEventListener("DOMContentLoaded", function () {
     if (checkbox && !checkbox.checked && checkbox.offsetParent !== null) {
         alert("You must accept the minimum spots requirement to continue.");
         return;
+    }
+    if(checkbox2 && !checkbox2.checked)
+    {
+      alert("You must accept the Terms & Conditions for the providers to continue.");
+      return;
     }
 
     document.getElementById("redirect-message").style.display = "block";
@@ -202,6 +417,21 @@ document.addEventListener("DOMContentLoaded", function () {
           // Redirect the user to Paystack payment page
           redirect_from_checkout = true;
           window.location.href = data.data.redirect_url;
+
+          if(code)
+          {
+             fetch(`${rest_object.rest_url}delete_code`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "X-WP-Nonce": rest_object.nonce,
+                },
+                body: JSON.stringify({
+                  code: code,
+                }),
+              })
+          }
+
         } else if (data.response && data.response.code === "invalid_email_address"){
           alert("Invalid email address");
           document.getElementById("redirect-message").style.display = "none";
@@ -316,8 +546,7 @@ window.addEventListener("pagehide", releaseSpots);
     prevBtn.disabled = isCurrentMonth;
   }
 
-  function generateCalendar(year, month, slotsData = {}) {
-    const calendarBody = document.getElementById("calendar-body");
+  function generateCalendar(year, month, slotsData = {}) {    
     calendarBody.innerHTML = "";
 
     let firstDay = new Date(year, month, 1).getDay();
@@ -565,7 +794,7 @@ window.addEventListener("pagehide", releaseSpots);
                       selectedAvailabilityId;
 
                     delete_button.addEventListener("click", (e) => {
-                      button = e.target;
+                      const button = e.target;
                       button.disabled = true;
                       button.textContent = "Deleting...";
 
@@ -759,7 +988,25 @@ const totalCost = Array.from(allCostTds)
     const provider = providerSelect.value;
     serviceSelect.innerHTML = "";
     serviceSelect.disabled = true;
-    generateCalendar(currentYear, currentMonth, {}); 
+    codeDiv.style.display = "none";
+    if(provider != WILD_BODY_CARE_ID)
+    {
+      myCalendar.style.display = "block";
+      calendarTitle.style.display = "block";
+      prevBtn.style.display = "block";
+      nextBtn.style.display = "block";   
+      codeDiv.style.display = "none";  
+      generateCalendar(currentYear, currentMonth, {}); 
+    }
+    else
+    {
+      myCalendar.style.display = "none";
+      calendarTitle.style.display = "none";
+      prevBtn.style.display = "none";
+      nextBtn.style.display = "none";      
+      codeDiv.style.display = "block";
+    }
+    
 
     serviceDescriptionDiv.style.display = "none";
     serviceDescription.textContent = "";
@@ -798,6 +1045,8 @@ const totalCost = Array.from(allCostTds)
     }
 
     const minSpots = parseInt(selectedService.min_spots, 10) || 0;
+    //TERMS ON EACH SERVICE ASD
+    const terms = selectedService.terms;
 
         if (minSpots > 0) {
           serviceMinSpotsDiv.style.display = "block";
@@ -805,6 +1054,13 @@ const totalCost = Array.from(allCostTds)
             `${selectedService.service_name} requires a minimum of ${minSpots} bookings for a selected time slot. If ${minSpots} spots are not filled before the date selected you will be notified and the refund process will start.`;
         } else {
           serviceMinSpotsDiv.style.display = "none";
+        }
+
+        if (terms && terms.length > 0) {
+          termsDiv.style.display = "block";
+          termsDiv.querySelector("#terms_description").textContent = terms;
+        } else {
+          termsDiv.style.display = "none";
         }
 
     fetch(

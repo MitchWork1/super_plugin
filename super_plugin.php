@@ -154,7 +154,15 @@ add_shortcode('custom_calendar', 'pcp_custom_calendar_shortcode');
 function pcp_custom_calendar_shortcode() {
     global $wpdb;
 
-    $providers = $wpdb->get_results("SELECT * FROM {$wpdb->prefix}provider_sites");     
+    $providers = $wpdb->get_results(
+    "SELECT * 
+        FROM {$wpdb->prefix}provider_sites p
+        WHERE EXISTS (
+            SELECT 1 
+            FROM {$wpdb->prefix}services s
+            WHERE s.provider_id = p.provider_id
+        )"
+    );
 
     ob_start(); ?>
     <div class="calendar-scroll-wrapper">
@@ -165,6 +173,7 @@ function pcp_custom_calendar_shortcode() {
                 <select id="provider-select">
                     <option value="">-- Select Provider --</option>
                     <?php foreach ($providers as $provider): ?>
+                        <?php if($provider->active == 0) { continue; }; ?>
                         <option value="<?= esc_attr($provider->provider_id); ?>">
                             <?= esc_html($provider->provider_name); ?>
                         </option>
@@ -177,15 +186,28 @@ function pcp_custom_calendar_shortcode() {
                     <option value="">-- Select Provider First --</option>
                 </select>
             </div>
+
+            <div id="service_description_div" style="display: none;">
+                <h6 id="service_description_header">Service Description</h6>
+                <p id="service_description">Text</p>
+            </div>
+
             <div id="min_spots_div" style="display:none;">
-                 <h6 id=min_spots_header>Minimum Spots Requirement</h6>
-                 <p id=min_spots_description>This service requires a minimum of spots_required bookings for a selected time slot. 
+                 <h6 id="min_spots_header">Minimum Spots Requirement</h6>
+                 <p id="min_spots_description">This service requires a minimum of spots_required bookings for a selected time slot. 
                     If the minimum spots are not filled before the date selected you will be notified and the refund process will start.</p>
             </div>
+
+            <div id="terms_div" style="display:none;">
+                 <h6 id="terms_header">Provider Terms And Conditions</h6>
+                 <p id="terms_description">T&C's</p>
+            </div>            
             
-            <div id="service_description_div" style="display: none;">
-                <h6 id=service_description_header>Service Description</h6>
-                <p id=service_description>Text</p>
+            <div id="code_div" style="display:none;">
+                 <h6 id="code_div_header">Contact Wild Body Care</h6>
+                 <p id="wild_body">Wild Body Care has requested that bookings be made by contacting: 071 620 4108.<br>If you have already contact Wild Body Care and have a code, enter below!</p>
+                 <input id="code_input" type="text" placeholder="Enter Code">
+                 <button id = "code_button">Use Code</button>
             </div>
             <div id="calendar-controls" style="display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin: 10px 0;">
                 <button id="prev-month" disabled>&laquo; Previous</button>
@@ -245,20 +267,7 @@ function pcp_custom_calendar_shortcode() {
             <button id="timer-done-ok" style="padding:8px 12px;">Ok</button>
         </div>
     </div>
-<div id="client-info-modal" style="
-    display:none; 
-    position:fixed; 
-    top:0; 
-    left:0; 
-    width:100%; 
-    height:100%; 
-    background-color:rgba(0,0,0,0.6); 
-    z-index:9999; 
-    display:flex; 
-    align-items:center; 
-    justify-content:center; 
-    padding:1em;
-">
+    <div id="client-info-modal">
     <div style="
         background:#fff; 
         padding:1.5em; 
@@ -281,6 +290,21 @@ function pcp_custom_calendar_shortcode() {
         <label for="client-email" style="font-size:1em;">Email:</label><br>
         <input type="email" id="client-email" style="width:100%; padding:0.5em; margin-bottom:1em; font-size:1em;"><br>
 
+        <div style="
+            margin-top:1em; 
+            padding:1em; 
+            border:0.0625em solid #ddd; 
+            border-radius:0.375em; 
+            background:#f9f9f9; 
+            font-size:1em;
+        ">
+            <h3 style="margin:0 0 0.5em 0; font-size:1.1em;">Provider T&C's</h3>
+            <label style="display:flex; align-items:center; cursor:pointer; font-size:1em;">
+                <input type="checkbox" id= "terms_checkbox" style="margin-right:0.5em;">
+                I have read and accept the Terms And Conditions of all the providers I am booking with.
+            </label>
+        </div>
+
 
         <div id="min_check_div" style="
             display:none; 
@@ -302,6 +326,8 @@ function pcp_custom_calendar_shortcode() {
             </label>
         </div>
 
+                        
+
         <button id="submit-client-info" style="padding:0.5em 1em; font-size:1em; margin-top:1em;">Continue</button>
         <button id="cancel-client-info" style="padding:0.5em 1em; font-size:1em; background:#ccc; margin-left:0.5em;">Cancel</button>
 
@@ -311,7 +337,7 @@ function pcp_custom_calendar_shortcode() {
             Disclaimer: There is a non-refundable admin fee included in your payment - For cancellations and refunds of activities, please contact your chosen service provider directly.
         </div>
     </div>
-</div>
+    </div>
 
     </div>
 
@@ -338,7 +364,7 @@ function pcp_rest_get_services(WP_REST_Request $request) {
     $services_table = $wpdb->prefix . 'services';
 
     $services = $wpdb->get_results($wpdb->prepare(
-        "SELECT service_id, service_name, service_cost_main, service_description, min_spots FROM $services_table WHERE provider_id = %d",
+        "SELECT service_id, service_name, service_cost_main, service_description, min_spots, terms FROM $services_table WHERE provider_id = %d",
         $provider_id
     ));
 
@@ -2028,7 +2054,7 @@ function pcp_verify_payment($request){
     }
 
     if ($row->status === 'b') {
-        return new WP_REST_Response(['success' => true, 'message' => 'Already verified (status b)']);
+        return new WP_REST_Response(['success' => true, 'message' => 'Already verified']);
     }
 
     $paystack_secret = $wpdb->get_var("
@@ -2038,41 +2064,71 @@ function pcp_verify_payment($request){
     ");
 
     $curl = curl_init();
-  
-    curl_setopt_array($curl, array(
+
+    curl_setopt_array($curl, [
         CURLOPT_URL => "https://api.paystack.co/transaction/verify/$reference",
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_ENCODING => "",
-        CURLOPT_MAXREDIRS => 10,
         CURLOPT_TIMEOUT => 30,
-        CURLOPT_HTTP_VERSION => CURL_HTTP_VERSION_1_1,
-        CURLOPT_CUSTOMREQUEST => "GET",
-        CURLOPT_HTTPHEADER => array(
+        CURLOPT_HTTPHEADER => [
             "Authorization: Bearer $paystack_secret",
-            "Cache-Control: no-cache",
-        ),
-    ));
-    
+        ],
+    ]);
+
     $response = curl_exec($curl);
     $err = curl_error($curl);
     curl_close($curl);
 
     if ($err) {
-        return new WP_REST_Response(['success' => false, 'error' => 'Paystack Error: ' . $err], 500);
+        return new WP_REST_Response(['success' => false, 'error' => $err], 500);
     }
 
     $result = json_decode($response, true);
 
+    if (!isset($result['status']) || !$result['status'] || !isset($result['data'])) {
+        return new WP_REST_Response([
+            'success' => false,
+            'error' => 'Invalid Paystack response'
+        ], 500);
+    }
+
     $paystack_data = $result['data'];
-    $customer_email = sanitize_email($paystack_data['customer']['email']);
+
+    $customer_email = isset($paystack_data['customer']['email'])
+        ? sanitize_email($paystack_data['customer']['email'])
+        : '';
+
     if ($paystack_data['status'] === 'success') {
-        $wpdb->update($table, ['status' => 'b'], ['availability_id' => $row->availability_id]);
+
+        $wpdb->query(
+            $wpdb->prepare(
+                "UPDATE $table SET status = 'b', hold_until = NULL WHERE session_id = %s",
+                $reference
+            )
+        );
+
         update_sales_record($reference);
         create_and_send_email($customer_email, $reference);
-        return new WP_REST_Response(['success' => true, 'message' => 'Payment verified successfully']);
-    } else{
-        $wpdb->update($table, ['status' => 'a'], ['availability_id' => $row->availability_id]);
-        return new WP_REST_Response(['success' => false, 'message' => 'Payment verification failed'], 400);
+
+        return new WP_REST_Response([
+            'success' => true,
+            'message' => 'Payment verified successfully'
+        ]);
+
+    } else {
+
+        $wpdb->query(
+            $wpdb->prepare(
+                "UPDATE $table
+                 SET status = 'a', hold_until = NULL, session_id = NULL
+                 WHERE session_id = %s",
+                $reference
+            )
+        );
+
+        return new WP_REST_Response([
+            'success' => false,
+            'message' => 'Payment verification failed'
+        ], 400);
     }
 }
 
@@ -2302,7 +2358,8 @@ function build_split($provider_data, $total_cost, $live_mode){
         $share = intval($data['provider_total'] * 100);
         $subaccounts[] = [
             'subaccount' => $data['paystack_subaccount'],
-            'share' => $share
+            'share' => $share,
+            'type' => 'flat'
         ];
     }    
 
@@ -2311,13 +2368,15 @@ function build_split($provider_data, $total_cost, $live_mode){
         {
             $subaccounts[] = [
                 'subaccount' => 'ACCT_nwd4b21sk8j3xby', //MY_PACKSTACK CODE HARDCODE REPLACE ADD
-                'share' => $operational_cost //MY SHARE 
+                'share' => $operational_cost, //MY SHARE 
+                'type' => 'flat' 
             ];
         }
         else{
             $subaccounts[] = [
-                'subaccount' => 'ACCT_0jrt44sizueubsp', //MY_PACKSTACK CODE HARDCODE REPLACE ADD
-                'share' => $operational_cost //MY SHARE 
+                'subaccount' => 'ACCT_0q5jb5t9dlqcc3s', //MY_PACKSTACK CODE HARDCODE REPLACE ADD
+                'share' => $operational_cost, //MY SHARE 
+                'type' => 'flat' 
             ];
         }    
 
@@ -2364,6 +2423,146 @@ function get_split_code($split, $paystack_secret){
 
 }
 
+add_action('rest_api_init', function () {
+    register_rest_route('pcp/v1', '/book_with_code', [
+        'methods'             => 'POST',
+        'callback'            => 'pcp_book_with_code',
+        'permission_callback' => function ($request) {
+            $nonce = $request->get_header('X-WP-Nonce');
+            return wp_verify_nonce($nonce, 'wp_rest');
+        }
+    ]);
+});
+
+function pcp_book_with_code($request){
+    global $wpdb;
+
+    $params = $request->get_json_params();
+
+    $code = sanitize_text_field($params['code'] ?? '');
+    $session_id = sanitize_text_field($params['session_id'] ?? '');
+
+    if (empty($code)) {
+        return new WP_REST_Response(['error' => 'code'], 400);
+    }
+
+    if (empty($session_id)) {
+        return new WP_REST_Response(['error' => 'session_id'], 400);
+    }
+
+    $customer_codes = $wpdb->prefix . 'customer_codes';
+    $services = $wpdb->prefix . 'services';
+    $providers = $wpdb->prefix . 'provider_sites';
+    $availability = $wpdb->prefix . 'availability';
+
+    $row = $wpdb->get_row(
+        $wpdb->prepare(
+            "
+            SELECT 
+                cc.*,
+                s.service_name,
+                s.service_cost_main,
+                s.min_spots,
+                s.provider_id,
+                p.provider_name
+            FROM {$customer_codes} cc
+            INNER JOIN {$services} s ON cc.service_id = s.service_id
+            INNER JOIN {$providers} p ON s.provider_id = p.provider_id
+            WHERE cc.code = %s
+            ",
+            $code
+        )
+    );
+
+    if (!$row) {
+        return new WP_REST_Response(['error' => 'invalid_code'], 404);
+    }
+
+    if ($row->used) {
+        return new WP_REST_Response([
+            'success' => false,
+            'message' => 'Code already used!'
+        ], 200);
+    } else {
+        $wpdb->update(
+            $customer_codes,
+            ['used' => 1],
+            ['code_id' => $row->code_id],
+            ['%d'],
+            ['%d']
+        );
+    }
+
+    $insert = $wpdb->query(
+        $wpdb->prepare(
+            "
+            INSERT INTO {$availability}
+            (service_id, available_date, time_slot, time_slot_length_min, status, session_id, hold_until)
+            VALUES (%d,%s,%s,%d,'p',%s,DATE_ADD(NOW(), INTERVAL 15 MINUTE))
+            ",
+            $row->service_id,
+            $row->available_date,
+            $row->time_slot,
+            $row->time_slot_length_min,
+            $session_id
+        )
+    );
+
+    if (!$insert) {
+        return new WP_REST_Response(['error' => 'insert_failed'], 500);
+    }
+
+    $availability_id = $wpdb->insert_id;
+
+    $from = date('H:i', strtotime($row->time_slot));
+    $to = date('H:i', strtotime("+{$row->time_slot_length_min} minutes", strtotime($row->time_slot)));
+
+    $wpdb->delete($customer_codes, ['code' => $code]);
+
+    return new WP_REST_Response([
+        'success' => true,
+        'availability_id' => $availability_id,
+        'service_id' => $row->service_id,
+        'provider_id' => $row->provider_id,
+        'provider_name' => $row->provider_name,
+        'service_name' => $row->service_name,
+        'service_cost' => $row->service_cost_main,
+        'min_spots' => $row->min_spots,
+        'available_date' => $row->available_date,
+        'from_time' => $from,
+        'to_time' => $to
+    ], 200);
+}
+
+
+function delete_code($request){
+    global $wpdb;
+
+    $params = $request->get_json_params();
+
+    $code = sanitize_text_field($params['code'] ?? '');
+
+    if (empty($code)) {
+        return new WP_REST_Response(['error' => 'code'], 400);
+    }        
+
+    $customer_codes = $wpdb->prefix . 'customer_codes';
+
+    $deleted = $wpdb->get_row(
+        $wpdb->prepare(
+            "SELECT * FROM {$customer_codes} WHERE code = %s",
+            $code
+        )
+    );
+
+    if ($deleted !== false) {
+    return new WP_REST_Response(['success' => true, 'deleted_rows' => $deleted], 200);
+    } else {
+        return new WP_REST_Response(['success' => false, 'error' => 'Could not delete code'], 500);
+    }
+
+}
+
 //========
 //Paystack
 //========
@@ -2399,11 +2598,23 @@ function paystack_webhook(WP_REST_Request $request) {
     $signature = $request->get_header('x-paystack-signature');
 
     // Get your Paystack secret key from DB
-    $paystack_secret = $wpdb->get_var("
-        SELECT paystack_api_key_secret
+    $paystack_info_row = $wpdb->get_row("
+        SELECT paystack_live, paystack_api_key_test, paystack_api_key_secret
         FROM {$wpdb->prefix}paystack_info
         WHERE id = 1
     ");
+
+    if ($paystack_info_row) {
+        $live_mode = (int) $paystack_info_row->paystack_live;
+        if ($live_mode === 0) {
+            $paystack_secret = $paystack_info_row->paystack_api_key_test;
+        } else {
+            $paystack_secret = $paystack_info_row->paystack_api_key_secret;
+        }
+    } else {
+        $paystack_secret = '';
+    }    
+    
 
     if (!$signature || $signature !== hash_hmac('sha512', $input, $paystack_secret)) {
         error_log(date('[Y-m-d H:i:s] ') . "Paystack webhook: Invalid signature");
@@ -2548,6 +2759,7 @@ function create_tables() {
         service_cost_main DECIMAL(10,2) NOT NULL,
         max_spots SMALLINT UNSIGNED NOT NULL DEFAULT 8,
         min_spots SMALLINT UNSIGNED DEFAULT 0,
+        terms VARCHAR(255) NOT NULL DEFAULT '',
         service_description VARCHAR(255),
         PRIMARY KEY (service_id),
         FOREIGN KEY (provider_id) REFERENCES $provider_sites_table(provider_id) ON DELETE CASCADE
@@ -2613,7 +2825,21 @@ function create_tables() {
         customer_number VARCHAR(100),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (refund_id)
-    ) $charset_collate;";        
+    ) $charset_collate;";       
+    
+    $customer_codes = $wpdb->prefix . 'customer_codes';
+    $sql7 = "CREATE TABLE IF NOT EXISTS $customer_codes (
+        code_id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
+        code VARCHAR(5) NOT NULL,
+        available_date DATE NOT NULL,
+        time_slot TIME,
+        time_slot_length_min INT,
+        service_id BIGINT(20) UNSIGNED NOT NULL,       
+        used BOOLEAN NOT NULL DEFAULT 0,
+        PRIMARY KEY (code_id),
+        UNIQUE KEY code_unique (code),
+        FOREIGN KEY (service_id) REFERENCES $services_table(service_id) ON DELETE CASCADE
+    ) $charset_collate;";     
 
     require_once(ABSPATH . 'wp-admin/includes/upgrade.php');
     dbDelta($sql0);
@@ -2623,6 +2849,7 @@ function create_tables() {
     dbDelta($sql4);
     dbDelta($sql5);
     dbDelta($sql6);
+    dbDelta($sql7);
 }
 
 add_action('init', 'register_provider_role');
@@ -2844,6 +3071,8 @@ function provider_services_manager_page() {
 
     $providers_table = $wpdb->prefix . 'provider_sites';
     $services_table = $wpdb->prefix . 'services';
+    $availability_table = $wpdb->prefix . 'availability';
+
     $current_user = wp_get_current_user();
     $username = $current_user->user_login;
 
@@ -2858,214 +3087,291 @@ function provider_services_manager_page() {
 
     echo '<div class="wrap"><h1>Provider Services Manager</h1>';
 
-    // Add service
+    /* ================= ADD SERVICE ================= */
+
     if (isset($_POST['add_service_submit'])) {
+
         $service_name = sanitize_text_field($_POST['service_name']);
         $service_cost_provider = floatval($_POST['service_cost']);
         $max_spots = intval($_POST['max_spots']);
-        $service_description = sanitize_text_field($_POST['service_description']);
-        $service_description = substr($service_description, 0, 255);
+        $service_description = substr(sanitize_text_field($_POST['service_description']),0,255);
         $min_spots = intval($_POST['min_spots_input'] ?? 0);
 
-        // Round up to nearest 1 after adding 10%
+        // Terms (CUSTOM TEXT)
+        $terms = '';
+        if (!empty($_POST['terms_checkbox'] ?? '') && !empty($_POST['terms_text'] ?? '')) {
+            $terms = substr(
+                sanitize_text_field($_POST['terms_text']),
+                0,
+                255
+            );
+        }
+
         $service_cost_main = ceil($service_cost_provider * 1.1);
 
         $valid_cost = $service_cost_provider >= 10;
         $valid_maxSpots = $max_spots > 0;
         $valid_min_spots = $min_spots <= $max_spots;
 
-        
         $existing = $wpdb->get_var($wpdb->prepare(
-            "SELECT COUNT(*) FROM $services_table WHERE service_name = %s AND provider_id = %d",
-            $service_name, $provider_id
+            "SELECT COUNT(*) FROM $services_table 
+             WHERE service_name = %s AND provider_id = %d",
+            $service_name,$provider_id
         ));
 
-        if($valid_cost && $valid_maxSpots && $valid_min_spots)
-            {
-                if ($existing > 0) {
-                    echo '<div class="notice notice-warning"><p>Service already exists.</p></div>';
-                } else {
-                    $wpdb->insert($services_table, [
-                        'provider_id'           => $provider_id,
-                        'service_name'          => $service_name,
-                        'service_cost_provider' => $service_cost_provider,
-                        'service_cost_main'     => $service_cost_main,
-                        'max_spots'             => $max_spots,
-                        'min_spots'             => $min_spots,
-                        'service_description'   => $service_description
-                    ]);
+        if ($valid_cost && $valid_maxSpots && $valid_min_spots) {
 
-                    echo '<div class="updated"><p>Service added.</p></div>';
-                }
-            }
-         else
-            {
-                echo '<div class="notice notice-warning"><p>Invalid cost or max spots</p></div>';
-            }
-    }
-
-    $availability_table = $wpdb->prefix . 'availability';
-
-    // Delete service
-    if (isset($_POST['delete_service_id'])) {
-        $delete_id = intval($_POST['delete_service_id']);
-        
-        $has_bookings = $wpdb->get_var( $wpdb->prepare(
-            "SELECT COUNT(*) FROM $availability_table WHERE service_id = %d AND status IN ('p','b')",
-            $delete_id
-        ) );
-
-        if ($has_bookings) {
-            echo '<div class="error"><p>Cannot delete service: there are pending or booked slots.</p></div>';
-        } else {
-            // Safe to delete
-            $deleted = $wpdb->delete($services_table, ['service_id' => $delete_id]);
-            if ($deleted) {
-                echo '<div class="updated"><p>Service deleted.</p></div>';
+            if ($existing > 0) {
+                echo '<div class="notice notice-warning"><p>Service already exists.</p></div>';
             } else {
-                echo '<div class="error"><p>Service deletion failed.</p></div>';
+
+                $wpdb->insert($services_table,[
+                    'provider_id'=>$provider_id,
+                    'service_name'=>$service_name,
+                    'service_cost_provider'=>$service_cost_provider,
+                    'service_cost_main'=>$service_cost_main,
+                    'max_spots'=>$max_spots,
+                    'min_spots'=>$min_spots,
+                    'service_description'=>$service_description,
+                    'terms'=>$terms
+                ]);
+
+                echo '<div class="updated"><p>Service added.</p></div>';
             }
         }
     }
 
-    //Edit cost and service description
-    if (isset($_POST['edit_form_update'])) {
-        $edit_id = intval($_POST['edit_service_id']);
-        $new_cost_provider = floatval($_POST['new_service_cost_provider']);
-        $new_cost_main = ceil($new_cost_provider * 1.1);
-        $new_service_description = strval($_POST['new_service_description']);
-        $new_min_spots = intval($_POST['new_min_spots']  ?? 0);
+    /* ================= DELETE SERVICE ================= */
 
-        $service_row = $wpdb->get_row($wpdb->prepare(
-            "SELECT * FROM $services_table WHERE service_id = %d AND provider_id = %d",
-            $edit_id, $provider_id
+    if (isset($_POST['delete_service_id'])) {
+
+        $delete_id = intval($_POST['delete_service_id']);
+
+        $has_bookings = $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(*) FROM $availability_table 
+             WHERE service_id=%d 
+             AND status IN ('p','b') 
+             AND available_date >= CURDATE()",
+            $delete_id
         ));
 
-        $max_spots = intval($service_row->max_spots ?? 0);
-        $valid_cost = $new_cost_provider > 10;
-        $valid_min_spots = $new_min_spots <= $max_spots;
+        if ($has_bookings) {
+            echo '<div class="error"><p>Cannot delete service with bookings.</p></div>';
+        } else {
+            $wpdb->delete($services_table,['service_id'=>$delete_id]);
+        }
+    }
 
-        if ($service_row && $valid_cost && $valid_min_spots) {
+    /* ================= EDIT SERVICE ================= */
+
+    if (isset($_POST['edit_form_update'])) {
+
+        $edit_id = intval($_POST['edit_service_id'] ?? 0);
+
+        $new_cost_provider = floatval($_POST['new_service_cost_provider'] ?? 0);
+        $new_cost_main = ceil($new_cost_provider * 1.1);
+
+        $new_description = substr(
+            sanitize_text_field($_POST['new_service_description'] ?? ''),
+            0,
+            255
+        );
+
+        $new_min_spots = intval($_POST['new_min_spots'] ?? 0);
+
+        $new_terms = '';
+
+        if (!empty($_POST['edit_terms_checkbox'] ?? '') &&
+            !empty($_POST['edit_terms_text'] ?? '')
+        ) {
+            $new_terms = substr(
+                sanitize_text_field($_POST['edit_terms_text']),
+                0,
+                255
+            );
+        }
+
+        $service_row = $wpdb->get_row(
+            $wpdb->prepare(
+                "SELECT * FROM $services_table 
+                WHERE service_id=%d AND provider_id=%d",
+                $edit_id,
+                $provider_id
+            )
+        );
+
+        if ($service_row) {
+
             $wpdb->update(
                 $services_table,
                 [
-                    'service_cost_provider' => $new_cost_provider,
-                    'service_cost_main'     => $new_cost_main,
-                    'service_description'   => $new_service_description,
-                    'min_spots'             => $new_min_spots
+                    'service_cost_provider'=>$new_cost_provider,
+                    'service_cost_main'=>$new_cost_main,
+                    'service_description'=>$new_description,
+                    'min_spots'=>$new_min_spots,
+                    'terms'=>$new_terms
                 ],
-                ['service_id' => $edit_id]
+                ['service_id'=>$edit_id]
             );
-            echo '<div class="updated"><p>Service description and cost updated. If the minimum spots is lower than original please inform customers!</p></div>';
         }
-        else
-            {
-                echo '<div class="notice notice-warning"><p>Invalid cost or min spots</p></div>';
-            }
     }
 
-    
+    /* ================= ADD FORM ================= */
 
-    // Add form
-    echo '<form method="post" style="margin-bottom: 1em;">';
-    echo '<input type="text" name="service_name" placeholder="New Service Name" required> ';
-    echo '<input type="number" name="service_cost" placeholder="Cost (Provider)" step="0.01" min="10" required> ';
-    echo '<input type="number" name="max_spots" placeholder="Max Spots" min="1" required> <br><br>';
-    echo '<input type=checkbox id="min_spots_checkbox" name="min_spots_checkbox" onclick="toggleMinSpotsField()"><label style="font-weight: 600;" for="min_spots_checkbox">Minimum spot requirement</label><br>' ;
-    echo '<input type="number" id="min_spots_input" name="min_spots_input" min="0" placeholder="Minimum Spots" disabled required style="display:none;margin-top:1em;">';
-    echo '<textarea name="service_description" 
-        placeholder="Service Description (255 characters max)" 
-        maxlength="255" 
-        rows="4" 
-        cols="50" 
-        style="margin-top:1em;"
-        required></textarea> <br>';    
+    echo '<form method="post" style="margin-bottom:20px">';
+
+    echo '<input type="text" name="service_name" placeholder="Service Name" required> ';
+    echo '<input type="number" name="service_cost" placeholder="Cost Provider" step="0.01" min="10" required> ';
+    echo '<input type="number" name="max_spots" placeholder="Max Spots" min="1" required><br><br>';
+
+    echo '<input type="checkbox" id="min_spots_checkbox" onclick="toggleMinSpotsField()">
+          <label>Minimum spot requirement</label><br>';
+
+    echo '<input type="number" id="min_spots_input" name="min_spots_input"
+          style="display:none;margin-top:10px" disabled placeholder="Minimum Spots"><br>';
+
+    echo '<textarea name="service_description" maxlength="255" rows="4" cols="50"
+          placeholder="Service Description" required></textarea><br><br>';
+
+    // TERMS TEXTAREA
+    echo '<input type="checkbox" id="terms_checkbox" name="terms_checkbox" onclick="toggleTermsField()">
+          <label style="font-weight:600">Add Terms & Conditions</label><br>';
+
+    echo '<textarea id="terms_text" name="terms_text" maxlength="255"
+          rows="4" cols="50"
+          style="display:none;margin-top:10px"
+          placeholder="Type your service terms here"></textarea><br><br>';
+
     echo '<input type="submit" name="add_service_submit" class="button button-primary" value="Add Service">';
+
     echo '</form>';
 
-    // Display services
+    /* ================= DISPLAY TABLE ================= */
+
     $services = $wpdb->get_results($wpdb->prepare(
-        "SELECT * FROM $services_table WHERE provider_id = %d",
+        "SELECT * FROM $services_table WHERE provider_id=%d",
         $provider_id
     ));
 
     if ($services) {
+
         echo '<table class="widefat striped">';
-        echo '<thead><tr><th>Service Name</th><th>Provider Cost</th><th>Main Cost</th><th>Max Spots</th><th>Min Spots</th><th>Service Description</th><th>Actions</th></tr></thead><tbody>';
+        echo '<thead><tr>
+        <th>Service Name</th>
+        <th>Provider Cost</th>
+        <th>Main Cost</th>
+        <th>Max Spots</th>
+        <th>Min Spots</th>
+        <th>Description</th>
+        <th>Terms</th>
+        <th>Actions</th>
+        </tr></thead><tbody>';
 
         foreach ($services as $service) {
+
             $service_id = intval($service->service_id);
+
             echo '<tr>';
-            echo '<td>' . esc_html($service->service_name) . '</td>';
-            echo '<td>R' . esc_html(number_format($service->service_cost_provider, 2)) . '</td>';
-            echo '<td>R' . esc_html(number_format($service->service_cost_main, 2)) . '</td>';
-            echo '<td>' . esc_html($service->max_spots) . '</td>';
-            echo '<td>' . esc_html($service->min_spots) . '</td>';
-            echo '<td>' . esc_html($service->service_description) . '</td>';
-            echo '<td>';            
+            echo '<td>'.esc_html($service->service_name).'</td>';
+            echo '<td>R'.number_format($service->service_cost_provider,2).'</td>';
+            echo '<td>R'.number_format($service->service_cost_main,2).'</td>';
+            echo '<td>'.esc_html($service->max_spots).'</td>';
+            echo '<td>'.esc_html($service->min_spots).'</td>';
+            echo '<td>'.esc_html($service->service_description).'</td>';
+            echo '<td>'.esc_html($service->terms ?? '').'</td>';
 
+            echo '<td>';
+
+            /* Delete */
+            echo '<form method="post" style="display:inline"
+                  onsubmit="return confirm(\'Delete service?\');">
+                  <input type="hidden" name="delete_service_id" value="'.$service_id.'">
+                  <input type="submit" class="button button-secondary" value="Delete">
+                  </form>';
+
+            /* Edit form */
             echo '
-            <button type="button" class="button" onclick="toggleEditForm(' . $service_id . ')">Edit</button>
+            <button type="button" class="button" onclick="toggleEditForm('.$service_id.')">Edit</button>
 
-            <div id="edit_form_' . $service_id . '" style="display:none; margin-top:10px;">
-                <form method="post" onsubmit="return confirm(\'Save changes?\');">
-                    <input type="hidden" name="edit_service_id" value="' . $service_id . '">
-                    <label>Service Description</label><br>
-                    <textarea name="new_service_description" 
-                    maxlength="255" 
-                    rows="4" 
-                    cols="50" 
-                    required>' . esc_html($service->service_description) . '</textarea> <br>
+            <div id="edit_form_'.$service_id.'" style="display:none;margin-top:10px">
 
-                    <label for="new_service_cost_provider">Service Cost</label><br>
-                    <input type="number" id="new_service_cost_provider" value="'.esc_html(number_format($service->service_cost_provider, 2)) .'" name="new_service_cost_provider" step="0.01" min="10" required><br><br>
-                    <label for="new_min_spots">Minimum Spots</label><br>
-                    <input type="number" id="new_min_spots" value="'.esc_html(number_format($service->min_spots, 2)) .'" name="new_min_spots" step="1" min="0" required><br><br>
+            <form method="post">
 
-                    <input type="submit" name="edit_form_update" class="button button-primary" value="Save">
-                    <button type="button" class="button" onclick="toggleEditForm(' . $service_id . ')">Cancel</button>
-                </form>
-            </div>
-            ';           
-            echo '<form method="post" style="display:inline-block;margin-right:10px;" onsubmit="return confirm(\'Are you sure you want to delete this service?\');">';
-            echo '<input type="hidden" name="delete_service_id" value="' . intval($service->service_id) . '">';
-            echo '<input type="submit" class="button button-secondary" value="Delete">';
-            echo '</form>';
+            <input type="hidden" name="edit_service_id" value="'.$service_id.'">
 
-            echo '</td>';
-            
-            
-            echo '</tr>';
+            <textarea name="new_service_description" maxlength="255" rows="4" cols="50" required>'
+            .esc_html($service->service_description).'</textarea><br><br>
+
+            <label>Cost</label><br>
+            <input type="number" name="new_service_cost_provider"
+            value="'.esc_html($service->service_cost_provider).'"
+            step="0.01" min="10" required><br><br>
+
+            <label>Minimum Spots</label><br>
+            <input type="number" name="new_min_spots"
+            value="'.esc_html($service->min_spots).'"
+            step="1" min="0"><br><br>
+
+            <input type="checkbox" name="edit_terms_checkbox"
+            onclick="toggleEditTerms('.$service_id.')"
+            '.(!empty($service->terms)?'checked':'').'>
+            <label>Terms & Conditions</label><br>
+
+            <textarea id="edit_terms_text_'.$service_id.'"
+            name="edit_terms_text"
+            maxlength="255"
+            rows="4" cols="50"
+            style="margin-top:10px;'.(empty($service->terms)?'display:none':'').'">'
+            .esc_html($service->terms ?? '').'</textarea><br><br>
+
+            <input type="submit" name="edit_form_update"
+            class="button button-primary" value="Save">
+            </form>
+
+            </div>';
+
+            echo '</td></tr>';
         }
 
         echo '</tbody></table>';
-    } else {
-        echo '<p><em>No services found for this provider.</em></p>';
     }
+
+    /* ================= JS ================= */
 
     echo '
     <script>
-    function toggleEditForm(id) {
-        document.querySelectorAll("[id^=\'edit_form_\']").forEach(function(form) {
-            if (form.id !== "edit_form_" + id) {
-                form.style.display = "none";
-            }
+
+    function toggleMinSpotsField(){
+        let cb=document.getElementById("min_spots_checkbox");
+        let input=document.getElementById("min_spots_input");
+
+        input.disabled=!cb.checked;
+        input.style.display=cb.checked?"block":"none";
+    }
+
+    function toggleTermsField(){
+        let cb=document.getElementById("terms_checkbox");
+        let txt=document.getElementById("terms_text");
+
+        txt.style.display=cb.checked?"block":"none";
+    }
+
+    function toggleEditForm(id){
+        document.querySelectorAll("[id^=edit_form_]").forEach(f=>{
+            if(f.id!=="edit_form_"+id) f.style.display="none";
         });
 
-        const target = document.getElementById("edit_form_" + id);
-        if (!target) return;
-
-        target.style.display = (target.style.display === "block") ? "none" : "block";        
+        let f=document.getElementById("edit_form_"+id);
+        if(f) f.style.display=(f.style.display==="block")?"none":"block";
     }
-    function toggleMinSpotsField() {
-        const min_spots_checkbox = document.getElementById("min_spots_checkbox");
-        const min_spots_input = document.getElementById("min_spots_input");
 
-        min_spots_input.disabled = !min_spots_checkbox.checked;
-        min_spots_input.style.display = min_spots_checkbox.checked ? "block" : "none";
+    function toggleEditTerms(id){
+        let txt=document.getElementById("edit_terms_text_"+id);
+        if(!txt) return;
+        txt.style.display=txt.style.display==="none"?"block":"none";
     }
-    </script>
-    ';
+
+    </script>';
 
     echo '</div>';
 }
@@ -3073,7 +3379,8 @@ function provider_services_manager_page() {
 
 add_action('admin_menu', 'provider_service_time_slots');
 function provider_service_time_slots() {
-    if (current_user_can('provider')) {
+    $user = wp_get_current_user();
+    if (current_user_can('provider') && $user->user_login !== "Wild Body Care") {
         add_menu_page(
             'Service Availability Editor',
             'Service Availability',
@@ -3999,6 +4306,182 @@ function provider_refunds_dashboard_page() {
     echo '</div>';
 }
 
+//Customer Code Page
+
+add_action('admin_menu', 'provider_customer_code_dashboard_menu');
+function provider_customer_code_dashboard_menu() {
+    $user = wp_get_current_user();
+    if (current_user_can('provider') && $user->user_login === "Wild Body Care") {
+        add_menu_page(
+            'Customer Code Bookings',
+            'Code Bookings',
+            'read',
+            'provider-code-manager',
+            'provider_customer_code_dashboard_page',
+            'dashicons-clock',
+            3
+        );
+    }
+}
+
+function provider_customer_code_dashboard_page() {
+    global $wpdb;
+
+    $providers_table = $wpdb->prefix . 'provider_sites';
+    $services_table  = $wpdb->prefix . 'services';
+    $customer_codes  = $wpdb->prefix . 'customer_codes';
+
+    $current_user = wp_get_current_user();
+    $username = $current_user->user_login;
+
+    $provider = $wpdb->get_row(
+        $wpdb->prepare("SELECT * FROM {$providers_table} WHERE provider_name = %s", $username)
+    );
+
+    if (!$provider) {
+        echo '<div class="notice notice-error"><p>Provider not found.</p></div>';
+        return;
+    }
+
+    $provider_id = $provider->provider_id;
+
+    $services = $wpdb->get_results(
+        $wpdb->prepare("SELECT * FROM {$services_table} WHERE provider_id = %d", $provider_id)
+    );
+
+    if (!$services) {
+        echo '<div class="notice notice-error"><p>No services found.</p></div>';
+        return;
+    }
+
+    echo '<div class="wrap"><h1>Service Availability Editor</h1>';
+
+    echo '<form method="post">';
+    wp_nonce_field('generate_code_nonce');
+
+    echo '<label><strong>Select Service</strong></label><br>';
+    echo '<select name="service_id">';
+    foreach ($services as $service) {
+        echo '<option value="'.esc_attr($service->service_id).'">'.esc_html($service->service_name).'</option>';
+    }
+    echo '</select><br><br>';
+
+    echo '<label><strong>From Time</strong></label><br>';
+    echo '<input type="time" name="from_time" required><br><br>';
+
+    echo '<label><strong>To Time</strong></label><br>';
+    echo '<input type="time" name="to_time" required><br><br>';
+
+    echo '<label><strong>Date</strong></label><br>';
+    echo '<input type="date" name="for_date" required><br><br>';
+
+    echo '<input type="submit" name="add_time_slot" class="button button-primary" value="Generate Code">';
+    echo '</form>';
+
+    if (isset($_POST['add_time_slot'])) {
+        if (!wp_verify_nonce($_POST['_wpnonce'], 'generate_code_nonce')) {
+            echo '<div class="notice notice-error"><p>Security check failed.</p></div>';
+            return;
+        }
+
+        $service_id = intval($_POST['service_id']);
+        $from_time  = sanitize_text_field($_POST['from_time']);
+        $to_time    = sanitize_text_field($_POST['to_time']);
+        $for_date   = sanitize_text_field($_POST['for_date']);
+
+        $from = strtotime($from_time);
+        $to   = strtotime($to_time);
+
+        if ($from >= $to) {
+            echo '<div class="notice notice-error"><p>From Time must be earlier than To Time.</p></div>';
+            return;
+        }
+
+        $code = generate_unique_customer_code();
+
+        $wpdb->insert(
+            $customer_codes,
+            [
+                'service_id'  => $service_id,
+                'code'        => $code,
+                'available_date' => $for_date,
+                'time_slot'   => $from_time,
+                'time_slot_length_min' => ($to - $from) / 60
+            ],
+            ['%d','%s','%s','%s','%d']
+        );
+
+        echo '<div class="notice notice-success">';
+        echo '<p><strong>Generated Code:</strong> <span style="font-size:22px;">'.esc_html($code).'</span></p>';
+        echo '</div>';
+    }
+
+    $codes = $wpdb->get_results(
+        $wpdb->prepare(
+            "SELECT c.*, s.service_name
+             FROM {$customer_codes} c
+             INNER JOIN {$services_table} s ON c.service_id = s.service_id
+             WHERE s.provider_id = %d
+             ORDER BY c.code_id DESC",
+            $provider_id
+        )
+    );
+
+    if ($codes) {
+        echo '<h2 style="margin-top:30px;">Unredeemed Generated Codes</h2>';
+        echo '<table class="widefat fixed striped">';
+        echo '<thead>
+                <tr>
+                    <th>Code</th>
+                    <th>Service</th>
+                    <th>Date</th>
+                    <th>From</th>
+                    <th>To</th>
+                </tr>
+              </thead>';
+        echo '<tbody>';
+        foreach ($codes as $row) {
+            $start_time = DateTime::createFromFormat('H:i:s', $row->time_slot);
+            $from_time = $start_time->format('H:i');
+            $start_time->modify("+" . intval($row->time_slot_length_min) . " minutes");
+            $to_time = $start_time->format('H:i');
+
+            echo '<tr>';
+            echo '<td><strong>'.esc_html($row->code).'</strong></td>';
+            echo '<td>'.esc_html($row->service_name).'</td>';
+            echo '<td>'.esc_html($row->available_date).'</td>';
+            echo '<td>'.esc_html($from_time).'</td>';
+            echo '<td>'.esc_html($to_time).'</td>';
+            echo '</tr>';
+        }
+        echo '</tbody></table>';
+    } else {
+        echo '<p>No codes generated yet.</p>';
+    }
+
+    echo '</div>';
+}
+
+
+
+function generate_unique_customer_code() {
+    global $wpdb;
+    $customer_codes = $wpdb->prefix . 'customer_codes';
+    do {
+        $code = strtoupper(wp_generate_password(5, false, false));
+
+        $exists = $wpdb->get_var(
+            $wpdb->prepare(
+                "SELECT COUNT(*) FROM {$customer_codes} WHERE code = %s",
+                $code
+            )
+        );
+
+    } while ($exists > 0);
+
+    return $code;
+}
+
 // REST API endpoint to update status
 add_action('rest_api_init', function() {
     register_rest_route('pcp/v1', '/update_refund_status', [
@@ -4642,7 +5125,7 @@ function create_and_send_email($to, $session_id){
         return;
     }
 
-
+    error_log("Attempting to send ticket email to customer: $to");
     $message = generate_html_email_from_availability($results, $session_id);
 
     $subject = 'Tickets!';
@@ -4655,11 +5138,13 @@ function create_and_send_email($to, $session_id){
 }
 
 function generate_html_email_from_availability($availability_rows, $session_id) {
+
     $grouped = [];
 
     $qr_url = home_url('/ticket-verification/?reference=' . urlencode($session_id));
 
     foreach ($availability_rows as $row) {
+
         $provider = $row['provider_name'];
         $service = $row['service_name'];
         $provider_email = $row['sales_email'];
@@ -4669,26 +5154,35 @@ function generate_html_email_from_availability($availability_rows, $session_id) 
         $start_time->modify("+" . $row['time_slot_length_min'] . " minutes");
         $to_time = $start_time->format('H:i');
 
-        $grouped[$provider][$service][] = [
+        if (!isset($grouped[$provider])) {
+            $grouped[$provider] = [
+                'email' => $provider_email,
+                'services' => []
+            ];
+        }
+
+        $grouped[$provider]['services'][$service][] = [
             'available_date' => $row['available_date'],
             'from_time' => $from_time,
             'to_time' => $to_time,
         ];
     }
 
-
     $html  = '<div style="font-family: Arial, sans-serif;">';
     $html .= '<h2 style="color:#2c3e50;">Tickets</h2>';
     $html .= '<p style="font-size:14px;color:#555;"><strong>Reference number:</strong> ' . esc_html($session_id) . '</p>';
 
-    foreach ($grouped as $provider_name => $services) {
-        $html .= "<h3 style='color:#2980b9; margin-bottom:5px;'>" . esc_html($provider_name) . "</h3>";         
+    foreach ($grouped as $provider_name => $providerData) {
 
-        foreach ($services as $service_name => $tickets) {
+        $html .= "<h3 style='color:#2980b9; margin-bottom:5px;'>" . esc_html($provider_name) . "</h3>";
+
+        foreach ($providerData['services'] as $service_name => $tickets) {
+
             $html .= "<h4 style='color:#27ae60; margin-bottom:3px;'>" . esc_html($service_name) . "</h4>";
             $html .= "<ul style='list-style-position: inside; padding-left:0; margin:10px auto; display:inline-block; text-align:left;'>";
 
             foreach ($tickets as $ticket) {
+
                 $ticket_date = esc_html($ticket['available_date']);
                 $ticket_from = esc_html($ticket['from_time']);
                 $ticket_to   = esc_html($ticket['to_time']);
@@ -4698,22 +5192,20 @@ function generate_html_email_from_availability($availability_rows, $session_id) 
 
             $html .= "</ul>";
         }
-        $html .= "<h4 style='color:#2980b9; margin-bottom:5px;'>" . "Provider Email: " .esc_html($provider_email) . "</h3>";
+
+        $html .= "<h4 style='color:#2980b9; margin-bottom:5px;'>Provider Email: " . esc_html($providerData['email']) . "</h4>";
     }
 
-    $html .= "
-        <p><a href='$qr_url'>Click here</a> to view your tickets.</p>        
-    ";  
+    $html .= "<p><a href='$qr_url'>Click here</a> to view your tickets.</p>";
 
-        $upload_dir = wp_upload_dir();
+    $upload_dir = wp_upload_dir();
     $logo_url = $upload_dir['baseurl'] . '/2025/09/cropped-cropped-logo-latest-transparent-bg-scaled-1.jpg';
 
     $html .= '<img src="' . esc_url($logo_url) . '" alt="Logo" style="max-width:200px; margin-top:20px;" />';
 
     $html .= "<div style='font-size:12px;color:#888;margin-top:20px;'>
-            Disclaimer: There is a non-refundable admin fee included in your payment - For cancellations and refunds of activities, please contact your chosen service provider directly.
-        </div>";
-
+        Disclaimer: There is a non-refundable admin fee included in your payment - For cancellations and refunds of activities, please contact your chosen service provider directly.
+    </div>";
 
     $html .= '</div>';
 
@@ -4726,11 +5218,10 @@ function create_and_send_provider_emails($session_id){
 
 
     $providers = $wpdb->get_results($wpdb->prepare("
-        SELECT DISTINCT p.provider_id, ps.sales_email
+        SELECT DISTINCT ps.provider_id, ps.sales_email
         FROM {$wpdb->prefix}provider_sites ps
         INNER JOIN {$wpdb->prefix}services s ON s.provider_id = ps.provider_id
         INNER JOIN {$wpdb->prefix}availability a ON a.service_id = s.service_id
-        INNER JOIN {$wpdb->prefix}provider_sites p ON p.provider_id = ps.provider_id
         WHERE a.session_id = %s
     ", $session_id));
 
@@ -4766,7 +5257,7 @@ function create_and_send_provider_emails($session_id){
             continue;
         }
 
-
+        error_log("Attempting to send sales email to provider with Email: $sales_email. For provider_id: $provider_id");
         $message = generate_html_email_for_provider($availability_rows, $session_id);
 
         $subject = 'Booked Tickets Receipt!';
