@@ -3523,7 +3523,7 @@ function provider_service_time_slots_page() {
                 if (strtotime($from_date) > strtotime($to_date)) {
                     $errors[] = "From Date must be earlier than or equal to To Date.";
                 }
-                if ((strtotime($to_date) - strtotime($from_date)) > (90 * 86400)) {
+                if ((strtotime($to_date) - strtotime($from_date)) > (365 * 86400)) {
                     $errors[] = "Date range cannot exceed 3 months.";
                 }
             }
@@ -5683,6 +5683,8 @@ function pcp_manual_paystack_verify($reference) {
     
 }
 
+
+
 add_filter('cron_schedules', function($schedules) {
     $schedules['every_five_minutes'] = [
         'interval' => 300,
@@ -5704,5 +5706,38 @@ register_deactivation_hook(__FILE__, function() {
 });
 
 
+function pcp_delete_stale_availability() {
 
+    if (date('j') != 1) return;
+
+    global $wpdb;
+    $wpdb->query("
+        DELETE FROM {$wpdb->prefix}availability
+        WHERE available_date < DATE_SUB(CURDATE(), INTERVAL 1 MONTH)
+    ");
+    error_log('Stale availability cleanup ran at: ' . current_time('mysql'));
+}
+
+
+add_action('pcp_delete_stale_availability_cron', 'pcp_delete_stale_availability');
+
+register_activation_hook(__FILE__, function () {
+
+    if (!wp_next_scheduled('pcp_delete_stale_availability_cron')) {
+
+        $now = current_time('timestamp');
+
+        $next_run = strtotime('today 01:00', $now);
+
+        if ($next_run <= $now) {
+            $next_run = strtotime('tomorrow 01:00', $now);
+        }
+
+        wp_schedule_event($next_run, 'daily', 'pcp_delete_stale_availability_cron');
+    }
+});
+
+register_deactivation_hook(__FILE__, function () {
+    wp_clear_scheduled_hook('pcp_delete_stale_availability_cron');
+});
 
