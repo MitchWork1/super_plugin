@@ -2154,7 +2154,7 @@ function pcp_extend_hold($request) {
         $wpdb->prepare("
             UPDATE $availability_table
             SET hold_until = DATE_ADD(NOW(), INTERVAL 10 MINUTE)
-            WHERE session_id = %d AND status = 'p'
+            WHERE session_id = %s AND status = 'p'
         ", $session_id)
     );
 
@@ -2759,8 +2759,8 @@ function create_tables() {
         service_cost_main DECIMAL(10,2) NOT NULL,
         max_spots SMALLINT UNSIGNED NOT NULL DEFAULT 8,
         min_spots SMALLINT UNSIGNED DEFAULT 0,
-        terms VARCHAR(255) NOT NULL DEFAULT '',
-        service_description VARCHAR(255),
+        terms VARCHAR(1000) NOT NULL DEFAULT '',
+        service_description VARCHAR(1000),
         PRIMARY KEY (service_id),
         FOREIGN KEY (provider_id) REFERENCES $provider_sites_table(provider_id) ON DELETE CASCADE
     ) $charset_collate;";
@@ -3094,7 +3094,7 @@ function provider_services_manager_page() {
         $service_name = sanitize_text_field($_POST['service_name']);
         $service_cost_provider = floatval($_POST['service_cost']);
         $max_spots = intval($_POST['max_spots']);
-        $service_description = substr(sanitize_text_field($_POST['service_description']),0,255);
+        $service_description = substr(sanitize_text_field($_POST['service_description']),0,1000);
         $min_spots = intval($_POST['min_spots_input'] ?? 0);
 
         // Terms (CUSTOM TEXT)
@@ -3103,7 +3103,7 @@ function provider_services_manager_page() {
             $terms = substr(
                 sanitize_text_field($_POST['terms_text']),
                 0,
-                255
+                1000
             );
         }
 
@@ -3187,7 +3187,7 @@ function provider_services_manager_page() {
             $new_terms = substr(
                 sanitize_text_field($_POST['edit_terms_text']),
                 0,
-                255
+                1000
             );
         }
 
@@ -3230,14 +3230,14 @@ function provider_services_manager_page() {
     echo '<input type="number" id="min_spots_input" name="min_spots_input"
           style="display:none;margin-top:10px" disabled placeholder="Minimum Spots"><br>';
 
-    echo '<textarea name="service_description" maxlength="255" rows="4" cols="50"
+    echo '<textarea name="service_description" maxlength="1000" rows="4" cols="50"
           placeholder="Service Description" required></textarea><br><br>';
 
     // TERMS TEXTAREA
     echo '<input type="checkbox" id="terms_checkbox" name="terms_checkbox" onclick="toggleTermsField()">
           <label style="font-weight:600">Add Terms & Conditions</label><br>';
 
-    echo '<textarea id="terms_text" name="terms_text" maxlength="255"
+    echo '<textarea id="terms_text" name="terms_text" maxlength="1000"
           rows="4" cols="50"
           style="display:none;margin-top:10px"
           placeholder="Type your service terms here"></textarea><br><br>';
@@ -3299,7 +3299,7 @@ function provider_services_manager_page() {
 
             <input type="hidden" name="edit_service_id" value="'.$service_id.'">
 
-            <textarea name="new_service_description" maxlength="255" rows="4" cols="50" required>'
+            <textarea name="new_service_description" maxlength="1000" rows="4" cols="50" required>'
             .esc_html($service->service_description).'</textarea><br><br>
 
             <label>Cost</label><br>
@@ -3319,7 +3319,7 @@ function provider_services_manager_page() {
 
             <textarea id="edit_terms_text_'.$service_id.'"
             name="edit_terms_text"
-            maxlength="255"
+            maxlength="1000"
             rows="4" cols="50"
             style="margin-top:10px;'.(empty($service->terms)?'display:none':'').'">'
             .esc_html($service->terms ?? '').'</textarea><br><br>
